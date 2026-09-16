@@ -55,6 +55,21 @@ See [documentation](https://DataBackupOfficial.github.io).
 
 * :rose: **...**
 
+## Differences from upstream
+This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com/XayahSuSuSu/Android-DataBackup) (based on v2.0.12, the 2.x track under `source/`), maintained independently with a series of backup-capability enhancements:
+
+* :arrows_counterclockwise: **Updated apps detection (bidirectional)** — the backup view filters apps whose *installed* version is newer than the backed-up one, while the restore view filters apps whose *cloud backup* version is newer than the installed one. The filter is off by default; checking it keeps only outdated apps.
+
+* :date: **Sort by last backup time** — new sort option (ascending/descending) driven by a derived backup ledger aggregated from existing RESTORE entities, without an extra database table.
+
+* :satellite: **Incremental cloud list sync** — a manifest (`apps_index.json`) is uploaded at the end of every cloud backup; loading the backed-up list downloads this single file instead of walking the whole remote tree, with graceful fallback to the legacy full scan. Archive sizes are preset from the manifest, so restore details no longer show 0 B.
+
+* :package: **Multiple backup copies** — configurable retention count (default 1, backward compatible); before each backup the current main copy is rotated to a timestamped copy and copies beyond the limit are cleaned up, log-rotation style.
+
+* :compare_arrows: **Counterpart version in details** — the app details page shows the other side's version: latest backup version on the backup view, installed local version on the restore view.
+
+See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D) and the future roadmap (appendix E).
+
 ## Screenshot
 <div align="center">
 	<img src="./fastlane/metadata/android/en-US/images/phoneScreenshots/01.jpg" width="275px"><img src="./fastlane/metadata/android/en-US/images/phoneScreenshots/02.jpg" width="275px"><img src="./fastlane/metadata/android/en-US/images/phoneScreenshots/03.jpg" width="275px">
