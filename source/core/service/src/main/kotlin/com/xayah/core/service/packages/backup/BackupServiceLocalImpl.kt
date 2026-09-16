@@ -59,6 +59,20 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
         t.update(processingIndex = t.processingIndex + 1)
     }
 
+    override suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = runCatching {
+        val appsDir = mPathUtil.getLocalBackupAppsDir()
+        val srcDir = "${appsDir}/${src.archivesRelativeDir}"
+        val dstDir = "${appsDir}/${dst.archivesRelativeDir}"
+        // 先写入轮转后的 config 再整体改名，与 protectLocalApp 同模式
+        mRootService.writeJson(data = dst, dst = PathUtil.getPackageRestoreConfigDst(srcDir))
+        mRootService.renameTo(srcDir, dstDir)
+    }.isSuccess
+
+    override suspend fun onDeleteCopy(copy: PackageEntity): Boolean = runCatching {
+        val srcDir = "${mPathUtil.getLocalBackupAppsDir()}/${copy.archivesRelativeDir}"
+        mRootService.deleteRecursively(srcDir)
+    }.isSuccess
+
     @Inject
     override lateinit var mPackageDao: PackageDao
 

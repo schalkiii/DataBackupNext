@@ -266,8 +266,20 @@ data class PackageEntity(
 
     val pkgUserKey: String
         get() = "${packageName}-${userId}"
+
+    val cloudIndexKey: String
+        get() = "${packageName}-${userId}-${preserveId}-${indexInfo.compressionType.type}"
 }
 
+
+/**
+ * 派生式备份台账：由同作用域 RESTORE 实体聚合而来，无需独立台账表。
+ */
+data class BackupIndex(
+    val lastBackupTime: Long,
+    val backedUpVersionCode: Long,
+    val copyCount: Int,
+)
 
 fun PackageEntity.asExternalModel() = App(
     id = id,
@@ -277,6 +289,21 @@ fun PackageEntity.asExternalModel() = App(
     isSystemApp = isSystemApp,
     selectionFlag = selectionFlag,
     selected = extraInfo.activated
+)
+
+// 合并台账状态的外部模型映射：isOutdated = 当前 versionCode 高于台账记录的备份版本
+fun PackageEntity.toAppWithStatus(index: BackupIndex?): App = App(
+    id = id,
+    packageName = packageName,
+    label = packageInfo.label,
+    preserveId = preserveId,
+    isSystemApp = isSystemApp,
+    selectionFlag = selectionFlag,
+    selected = extraInfo.activated,
+    lastBackupTime = index?.lastBackupTime ?: 0L,
+    backedUpVersionCode = index?.backedUpVersionCode ?: 0L,
+    copyCount = index?.copyCount ?: 0,
+    isOutdated = index != null && packageInfo.versionCode > index.backedUpVersionCode,
 )
 
 // Part update entity

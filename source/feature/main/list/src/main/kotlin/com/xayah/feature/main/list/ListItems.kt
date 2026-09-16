@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,6 +94,7 @@ fun LazyListScope.listItems(
                         packageName = item.packageName,
                         label = item.label,
                         preserveId = item.preserveId,
+                        isOutdated = item.isOutdated,
                         flag = item.selectionFlag,
                         selected = item.selected,
                         onClick = {
@@ -136,6 +138,7 @@ fun AppItem(
     packageName: String,
     label: String,
     preserveId: Long,
+    isOutdated: Boolean,
     flag: Int,
     selected: Boolean,
     onChangeFlag: (Long, Int) -> Unit,
@@ -158,6 +161,9 @@ fun AppItem(
             }
 
             Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                if (isOutdated) {
+                    Icon(modifier = Modifier.fillMaxHeight(), imageVector = Icons.Outlined.Update, contentDescription = null)
+                }
                 if (preserveId != 0L) {
                     Icon(modifier = Modifier.fillMaxHeight(), imageVector = Icons.Outlined.Shield, contentDescription = null)
                 }

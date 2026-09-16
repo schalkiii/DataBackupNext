@@ -22,6 +22,7 @@ const val ConfigsMediaRestoreName = "media_restore_config.json"
 const val ConfigsConfigurationsName = "configurations.json"
 const val BinArchiveName = "bin.zip"
 const val CloudTmpRelativeDir = "DataBackupTmpDir"
+const val CloudAppsIndexName = "apps_index.json"
 
 fun Context.filesDir(): String = filesDir.path
 fun Context.logDir(): String = "${filesDir()}/$LogRelativeDir"
@@ -97,6 +98,7 @@ class PathUtil @Inject constructor(
     fun getLocalBackupAppsDir(): String = getAppsDir(parent = context.localBackupSaveDir())
     fun getCloudTmpAppsDir(): String = getAppsDir(parent = context.cloudTmpAbsoluteDir())
     fun getCloudRemoteAppsDir(remote: String): String = getAppsDir(parent = remote)
+    fun getCloudRemoteAppsIndexPath(remote: String): String = "${getCloudRemoteAppsDir(remote)}/$CloudAppsIndexName"
     fun getLocalBackupFilesDir(): String = getFilesDir(parent = context.localBackupSaveDir())
     fun getCloudTmpFilesDir(): String = getFilesDir(parent = context.cloudTmpAbsoluteDir())
     fun getCloudRemoteFilesDir(remote: String): String = getFilesDir(parent = remote)

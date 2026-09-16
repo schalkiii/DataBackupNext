@@ -274,11 +274,13 @@ internal fun AppsFilterSheet(
                 OpType.BACKUP -> {
                     CheckBox(checked = filters.hasBackups, text = stringResource(R.string.apps_which_have_backups), onValueChange = { setFilters(filters.copy(hasBackups = filters.hasBackups.not())) })
                     CheckBox(checked = filters.hasNoBackups, text = stringResource(R.string.apps_which_have_no_backups), onValueChange = { setFilters(filters.copy(hasNoBackups = filters.hasNoBackups.not())) })
+                    CheckBox(checked = filters.updatedApps, text = stringResource(R.string.apps_with_new_local_versions), onValueChange = { setFilters(filters.copy(updatedApps = filters.updatedApps.not())) })
                 }
 
                 OpType.RESTORE -> {
                     CheckBox(checked = filters.installedApps, text = stringResource(R.string.installed), onValueChange = { setFilters(filters.copy(installedApps = filters.installedApps.not())) })
                     CheckBox(checked = filters.notInstalledApps, text = stringResource(R.string.not_installed), onValueChange = { setFilters(filters.copy(notInstalledApps = filters.notInstalledApps.not())) })
+                    CheckBox(checked = filters.updatedApps, text = stringResource(R.string.apps_with_new_cloud_versions), onValueChange = { setFilters(filters.copy(updatedApps = filters.updatedApps.not())) })
                 }
             }
 

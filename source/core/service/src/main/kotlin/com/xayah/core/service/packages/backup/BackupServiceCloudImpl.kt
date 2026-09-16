@@ -5,6 +5,7 @@ import com.xayah.core.data.repository.PackageRepository
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.database.dao.TaskDao
+import com.xayah.core.model.CloudIndexManifest
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
@@ -19,6 +20,8 @@ import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.PackagesBackupUtil
+import com.xayah.core.util.CloudAppsIndexName
+import com.xayah.core.util.DateUtil
 import com.xayah.core.util.PathUtil
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -151,6 +154,33 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
             entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
         }
         flag = false
+    }
+
+    override suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = runCatching {
+        val remoteAppDir = "${mRemoteAppsDir}/${src.archivesRelativeDir}"
+        val dstDir = "${mRemoteAppsDir}/${dst.archivesRelativeDir}"
+        // 先上传轮转后的 config 再整体改名，与 protectCloudApp 同模式
+        val tmpDir = mPathUtil.getCloudTmpDir()
+        val tmpJsonPath = PathUtil.getPackageRestoreConfigDst(tmpDir)
+        mRootService.writeJson(data = dst, dst = tmpJsonPath)
+        mCloudRepo.upload(client = mClient, src = tmpJsonPath, dstDir = remoteAppDir)
+        mRootService.deleteRecursively(tmpDir)
+        mClient.renameTo(remoteAppDir, dstDir)
+    }.isSuccess
+
+    override suspend fun onDeleteCopy(copy: PackageEntity): Boolean = runCatching {
+        val remoteAppDir = "${mRemoteAppsDir}/${copy.archivesRelativeDir}"
+        if (mClient.exists(remoteAppDir)) mClient.deleteRecursively(remoteAppDir)
+    }.isSuccess
+
+    override suspend fun onIndexManifestSaved() {
+        // 上传统计当前作用域全部 RESTORE 实体的索引清单，供增量同步使用
+        val packages = mPackageDao.queryPackages(OpType.RESTORE, mTaskEntity.cloud, mTaskEntity.backupDir)
+        val manifest = CloudIndexManifest(generatedAt = DateUtil.getTimestamp(), packages = packages)
+        val tmpJsonPath = "${mPathUtil.getCloudTmpDir()}/$CloudAppsIndexName"
+        mRootService.writeJson(data = manifest, dst = tmpJsonPath)
+        mCloudRepo.upload(client = mClient, src = tmpJsonPath, dstDir = mRemoteAppsDir)
+        mRootService.deleteRecursively(mPathUtil.getCloudTmpDir())
     }
 
     override suspend fun clear() {

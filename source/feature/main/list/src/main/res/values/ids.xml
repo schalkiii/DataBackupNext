@@ -31,6 +31,8 @@
     <item name="apps_which_have_no_backups" type="string" />
     <item name="installed" type="string" />
     <item name="not_installed" type="string" />
+    <item name="apps_with_new_local_versions" type="string" />
+    <item name="apps_with_new_cloud_versions" type="string" />
 
     <item name="backup_sort_type_items_apps" type="array" />
     <item name="backup_sort_type_items_files" type="array" />

@@ -43,6 +43,16 @@ See [documentation](https://DataBackupOfficial.github.io).
 
 * :sunny: **Easy**
 
+* :arrows_counterclockwise: **Updated Apps Detection**
+
+* :package: **Multiple Backup Copies**
+
+* :satellite: **Incremental Cloud List Sync**
+
+* :date: **Sort By Last Backup Time**
+
+* :compare_arrows: **Counterpart Version In Details**
+
 * :rose: **...**
 
 ## Screenshot

@@ -23,6 +23,8 @@ import com.xayah.core.datastore.readLoadedIconMD5
 import com.xayah.core.datastore.saveLoadedIconMD5
 import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.App
+import com.xayah.core.model.CloudIndexManifest
+import com.xayah.core.model.CloudIndexSchemaVersion
 import com.xayah.core.model.CompressionType
 import com.xayah.core.model.DataState
 import com.xayah.core.model.DataType
@@ -30,6 +32,8 @@ import com.xayah.core.model.DefaultPreserveId
 import com.xayah.core.model.OpType
 import com.xayah.core.model.SettingsData
 import com.xayah.core.model.UserInfo
+import com.xayah.core.model.database.BackupIndex
+import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.LabelAppCrossRefEntity
 import com.xayah.core.model.database.PackageDataStates
 import com.xayah.core.model.database.PackageDataStatesEntity
@@ -40,12 +44,15 @@ import com.xayah.core.model.database.PackageIndexInfo
 import com.xayah.core.model.database.PackageInfo
 import com.xayah.core.model.database.PackageStorageStats
 import com.xayah.core.model.database.PackageUpdateEntity
-import com.xayah.core.model.database.asExternalModel
+import com.xayah.core.model.database.toAppWithStatus
+import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.core.rootservice.service.RemoteRootService
+import com.xayah.core.util.CloudAppsIndexName
 import com.xayah.core.util.ConfigsPackageRestoreName
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.IconRelativeDir
+import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.PackageUtil
@@ -74,55 +81,99 @@ class AppsRepo @Inject constructor(
     private val pathUtil: PathUtil,
     private val cloudRepo: CloudRepository
 ) {
-    fun getBackups(filters: Flow<Filters>): Flow<Set<String>> = combine(
+    fun getBackups(filters: Flow<Filters>): Flow<Map<String, Long>> = combine(
         filters,
         appsDao.queryPackagesFlow(opType = OpType.RESTORE).flowOn(defaultDispatcher),
     ) { f, p ->
-        p.filter { it.indexInfo.cloud == f.cloud && it.indexInfo.backupDir == f.backupDir }.map { it.pkgUserKey }.toSet()
+        // pkgUserKey -> 备份版本码，供备份页"本机有更新"比较
+        p.filter { it.indexInfo.cloud == f.cloud && it.indexInfo.backupDir == f.backupDir }.associate { it.pkgUserKey to it.packageInfo.versionCode }
     }
 
-    fun getInstalledApps(users: Flow<List<UserInfo>>): Flow<Set<String>> = users.map { u ->
-        val set = mutableSetOf<String>()
+    fun getInstalledVersions(users: Flow<List<UserInfo>>): Flow<Map<String, Long>> = users.map { u ->
+        // pkgUserKey -> 本机已安装版本码，供恢复页"云端有更新"比较
+        val map = mutableMapOf<String, Long>()
         u.forEach {
-            set.addAll(rootService.getInstalledPackagesAsUser(0, it.id).map { p -> "${p.packageName}-${it.id}" }.toSet())
+            rootService.getInstalledPackagesAsUser(0, it.id).forEach { info ->
+                map["${info.packageName}-${it.id}"] = info.versionCode.toLong()
+            }
         }
-        set
+        map
     }
 
     fun getApp(id: Long) = appsDao.queryPackageFlow(id).flowOn(defaultDispatcher)
 
+    /**
+     * 详情页对侧版本实体：备份页取台账最近一次备份，恢复页取本机已安装版本（未安装为 null）。
+     */
+    fun getAppCounterpart(id: Long): Flow<PackageEntity?> = getApp(id).map { app ->
+        if (app == null) null
+        else when (app.indexInfo.opType) {
+            OpType.BACKUP -> appsDao.queryPackages(OpType.RESTORE, blocked = false)
+                .filter { it.packageName == app.packageName && it.userId == app.userId }
+                .maxByOrNull { it.extraInfo.lastBackupTime }
+
+            OpType.RESTORE -> rootService.getInstalledPackagesAsUser(0, app.userId)
+                .find { it.packageName == app.packageName }
+                ?.let { info -> app.copy(packageInfo = app.packageInfo.copy(versionName = info.versionName ?: "", versionCode = info.versionCode.toLong())) }
+        }
+    }.flowOn(defaultDispatcher)
+
     fun getApps(
         opType: OpType,
         listData: Flow<ListData>,
-        pkgUserSet: Flow<Set<String>>,
+        pkgUserVersions: Flow<Map<String, Long>>,
         refs: Flow<List<LabelAppCrossRefEntity>>,
         labels: Flow<Set<String>>,
         cloudName: String,
         backupDir: String
     ): Flow<List<App>> = combine(
         listData,
-        pkgUserSet,
+        pkgUserVersions,
         refs,
         labels,
         when (opType) {
             OpType.BACKUP -> appsDao.queryPackagesFlow(opType = opType, blocked = false)
             OpType.RESTORE -> appsDao.queryPackagesFlow(opType = opType, cloud = cloudName, backupDir = backupDir)
         }
-    ) { lData, pSet, lRefs, lLabels, apps ->
+    ) { lData, pMap, lRefs, lLabels, apps ->
         val data = lData.castTo<ListData.Apps>()
+        val pSet = pMap.keys
+        // 派生台账：RESTORE 实体按 pkgUserKey 聚合出最近备份时间/副本数；
+        // 比较基线：恢复页取本机已安装版本（未安装为 0），备份页取台账最近备份版本
+        val indexMap = when (opType) {
+            OpType.RESTORE -> getBackupIndexes(apps, baselineVersions = pMap)
+
+            OpType.BACKUP -> getBackupIndexes(appsDao.queryPackages(OpType.RESTORE, data.filters.cloud, data.filters.backupDir))
+        }
+        val outdatedSet = apps.filter { p -> indexMap[p.pkgUserKey]?.let { p.packageInfo.versionCode > it.backedUpVersionCode } == true }.map { it.pkgUserKey }.toSet()
         apps.asSequence()
             .filter(packageRepo.getKeyPredicateNew(key = data.searchQuery))
             .filter(packageRepo.getShowSystemAppsPredicate(value = data.filters.showSystemApps))
             .filter(packageRepo.getHasBackupsPredicate(value = data.filters.hasBackups, pkgUserSet = pSet))
             .filter(packageRepo.getHasNoBackupsPredicate(value = data.filters.hasNoBackups, pkgUserSet = pSet))
+            .filter(packageRepo.getUpdatedPredicate(value = data.filters.updatedApps, outdatedSet = outdatedSet))
             .filter(packageRepo.getInstalledPredicate(value = data.filters.installedApps, pkgUserSet = pSet))
             .filter(packageRepo.getNotInstalledPredicate(value = data.filters.notInstalledApps, pkgUserSet = pSet))
             .filter(packageRepo.getUserIdPredicateNew(userId = data.userList.getOrNull(data.userIndex)?.id))
             .filter { if (lLabels.isNotEmpty()) lRefs.find { ref -> it.packageName == ref.packageName && it.userId == ref.userId && it.preserveId == ref.preserveId } != null else true }
             .sortedWith(packageRepo.getSortComparatorNew(sortIndex = data.sortIndex, sortType = data.sortType))
             .sortedByDescending { p -> p.extraInfo.activated }.toList()
-            .map(PackageEntity::asExternalModel)
+            .map { it.toAppWithStatus(indexMap[it.pkgUserKey]) }
     }.flowOn(defaultDispatcher)
+
+    /**
+     * 派生式台账：对同作用域的 RESTORE 实体按 pkgUserKey 聚合，
+     * 取最近一次备份的时间与副本数；版本基线默认取台账备份版本，
+     * 传入 baselineVersions 时改用其版本（恢复页=本机已安装版本）。
+     */
+    fun getBackupIndexes(copies: List<PackageEntity>, baselineVersions: Map<String, Long>? = null): Map<String, BackupIndex> = copies.groupBy { it.pkgUserKey }.mapValues { (_, group) ->
+        val latest = group.maxByOrNull { it.extraInfo.lastBackupTime } ?: group.first()
+        BackupIndex(
+            lastBackupTime = latest.extraInfo.lastBackupTime,
+            backedUpVersionCode = if (baselineVersions != null) baselineVersions[latest.pkgUserKey] ?: 0L else latest.packageInfo.versionCode,
+            copyCount = group.size,
+        )
+    }
 
     fun countApps(opType: OpType) = appsDao.countPackagesFlow(opType = opType, blocked = false)
     fun countSelectedApps(opType: OpType) = appsDao.countActivatedPackagesFlow(opType = opType, blocked = false)
@@ -164,6 +215,7 @@ class AppsRepo @Inject constructor(
     suspend fun deleteSelected(ids: List<Long>) {
         val appsDir = pathUtil.getLocalBackupAppsDir()
         val deletedIds = mutableListOf<Long>()
+        val affectedClouds = mutableSetOf<String>()
         ids.forEach {
             val app = appsDao.queryById(it)
             if (app != null) {
@@ -180,10 +232,21 @@ class AppsRepo @Inject constructor(
                         }
                     }.withLog().isSuccess
                 }
-                if (isSuccess) deletedIds.add(app.id)
+                if (isSuccess) {
+                    deletedIds.add(app.id)
+                    if (app.indexInfo.cloud.isNotEmpty()) affectedClouds.add(app.indexInfo.cloud)
+                }
             }
         }
         appsDao.deleteByIds(deletedIds)
+        // 按账号合并一次回补索引清单
+        affectedClouds.forEach { cloudName ->
+            runCatching {
+                cloudRepo.withClient(cloudName) { client, entity ->
+                    refreshCloudIndex(client, entity)
+                }
+            }.withLog()
+        }
     }
 
     suspend fun setDataItems(ids: List<Long>, selections: PackageDataStates) {
@@ -506,45 +569,115 @@ class AppsRepo @Inject constructor(
 
     private suspend fun loadCloudApps(cloudName: String, onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) = runCatching {
         cloudRepo.withClient(cloudName) { client, entity ->
-            val remote = entity.remote
-            val path = pathUtil.getCloudRemoteAppsDir(remote)
-            if (client.exists(path)) {
-                val paths = client.walkFileTree(path)
-                val tmpDir = pathUtil.getCloudTmpDir()
-                paths.forEachIndexed { index, pathParcelable ->
-                    val fileName = PathUtil.getFileName(pathParcelable.pathString)
-                    onLoad(index, paths.size, fileName)
-                    if (fileName == ConfigsPackageRestoreName) {
-                        runCatching {
-                            cloudRepo.download(client = client, src = pathParcelable.pathString, dstDir = tmpDir) { path ->
-                                rootService.readJson<PackageEntity>(path).also { p ->
-                                    p?.id = 0
-                                    p?.extraInfo?.activated = false
-                                    p?.indexInfo?.cloud = entity.name
-                                    p?.indexInfo?.backupDir = remote
-                                    parsePreserveAndUserId(pathParcelable).also { result ->
-                                        result?.also { (pId, uId) ->
-                                            p?.indexInfo?.preserveId = pId
-                                            p?.indexInfo?.userId = uId
+            // 优先走清单增量同步
+            if (loadCloudAppsByIndex(client, entity, onLoad).not()) {
+                val remote = entity.remote
+                val path = pathUtil.getCloudRemoteAppsDir(remote)
+                if (client.exists(path)) {
+                    val paths = client.walkFileTree(path)
+                    val tmpDir = pathUtil.getCloudTmpDir()
+                    paths.forEachIndexed { index, pathParcelable ->
+                        val fileName = PathUtil.getFileName(pathParcelable.pathString)
+                        onLoad(index, paths.size, fileName)
+                        if (fileName == ConfigsPackageRestoreName) {
+                            runCatching {
+                                cloudRepo.download(client = client, src = pathParcelable.pathString, dstDir = tmpDir) { path ->
+                                    rootService.readJson<PackageEntity>(path).also { p ->
+                                        p?.id = 0
+                                        p?.extraInfo?.activated = false
+                                        p?.indexInfo?.cloud = entity.name
+                                        p?.indexInfo?.backupDir = remote
+                                        parsePreserveAndUserId(pathParcelable).also { result ->
+                                            result?.also { (pId, uId) ->
+                                                p?.indexInfo?.preserveId = pId
+                                                p?.indexInfo?.userId = uId
+                                            }
                                         }
-                                    }
-                                }?.apply {
-                                    if (appsDao.query(packageName, indexInfo.opType, userId, preserveId, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
-                                        appsDao.upsert(this)
+                                    }?.apply {
+                                        if (appsDao.query(packageName, indexInfo.opType, userId, preserveId, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
+                                            appsDao.upsert(this)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                appsDao.queryPackages(OpType.RESTORE, entity.name, entity.remote).forEach {
-                    val src = "${path}/${it.archivesRelativeDir}"
-                    if (client.exists(src).not()) {
-                        appsDao.delete(it.id)
+                    appsDao.queryPackages(OpType.RESTORE, entity.name, entity.remote).forEach {
+                        val src = "${path}/${it.archivesRelativeDir}"
+                        if (client.exists(src).not()) {
+                            appsDao.delete(it.id)
+                        }
                     }
+                    // 全量同步结束，回补缺失的索引清单
+                    refreshCloudIndex(client, entity)
                 }
             }
         }
+    }.withLog()
+
+    /**
+     * 清单增量同步：一次下载 apps_index.json 重建本地列表，
+     * 批量结算改为本地 diff，免去逐 app 的远程调用。
+     */
+    private suspend fun loadCloudAppsByIndex(
+        client: CloudClient,
+        entity: CloudEntity,
+        onLoad: suspend (cur: Int, max: Int, content: String) -> Unit,
+    ): Boolean = runCatching {
+        val remote = entity.remote
+        val indexPath = pathUtil.getCloudRemoteAppsIndexPath(remote)
+        if (client.exists(indexPath).not()) return false
+
+        var manifest: CloudIndexManifest? = null
+        cloudRepo.download(client = client, src = indexPath, dstDir = pathUtil.getCloudTmpDir()) { path ->
+            manifest = rootService.readJson<CloudIndexManifest>(path)
+        }.also { if (it.isSuccess.not()) return false }
+
+        val loaded = manifest ?: return false
+        if (loaded.schemaVersion > CloudIndexSchemaVersion) return false
+
+        onLoad(0, 1, CloudAppsIndexName)
+        @Suppress("UNNECESSARY_SAFE_CALL")
+        val packages = loaded.packages ?: return false
+        val existing = appsDao.queryPackages(OpType.RESTORE, entity.name, remote)
+        val existingMap = existing.associateBy { it.cloudIndexKey }
+
+        val upserts = packages.map { p ->
+            p.id = 0
+            p.indexInfo.cloud = entity.name
+            p.indexInfo.backupDir = remote
+            p.extraInfo.activated = false
+            // 已存在条目复用行 id 并保留本机选中状态
+            existingMap[p.cloudIndexKey]?.also { old ->
+                p.id = old.id
+                p.extraInfo.activated = old.extraInfo.activated
+            }
+            p
+        }
+        if (upserts.isNotEmpty()) appsDao.upsert(upserts)
+
+        // 清单中已不存在的本地条目直接删除
+        val indexKeys = packages.map { it.cloudIndexKey }.toSet()
+        existing.filter { it.cloudIndexKey !in indexKeys }.forEach { appsDao.delete(it.id) }
+
+        onLoad(1, 1, CloudAppsIndexName)
+        true
+    }.getOrElse {
+        LogUtil.log { "AppsRepo" to "loadCloudAppsByIndex failed: ${it.localizedMessage}" }
+        false
+    }
+
+    /**
+     * 由本地 DB 重建并上传索引清单（备份收尾/全量自愈/删除保护后的维护点）。
+     */
+    private suspend fun refreshCloudIndex(client: CloudClient, entity: CloudEntity) = runCatching {
+        val packages = appsDao.queryPackages(OpType.RESTORE, entity.name, entity.remote)
+        val manifest = CloudIndexManifest(generatedAt = DateUtil.getTimestamp(), packages = packages)
+        val tmpDir = pathUtil.getCloudTmpDir()
+        val tmpJsonPath = "${tmpDir}/$CloudAppsIndexName"
+        rootService.writeJson(data = manifest, dst = tmpJsonPath)
+        cloudRepo.upload(client = client, src = tmpJsonPath, dstDir = pathUtil.getCloudRemoteAppsDir(entity.remote))
+        rootService.deleteRecursively(tmpDir)
     }.withLog()
 
     suspend fun calculateLocalAppSize(app: PackageEntity) {
@@ -612,6 +745,8 @@ class AppsRepo @Inject constructor(
     )
 
     suspend fun calculateLocalAppArchiveSize(app: PackageEntity) {
+        // 云端实体的归档不在本地，保留清单预置的统计，避免现场计算本地路径得 0
+        if (app.indexInfo.cloud.isNotEmpty()) return
         app.displayStats.apkBytes = calculateLocalAppArchiveSize(app, DataType.PACKAGE_APK)
         app.displayStats.userBytes = calculateLocalAppArchiveSize(app, DataType.PACKAGE_USER)
         app.displayStats.userDeBytes = calculateLocalAppArchiveSize(app, DataType.PACKAGE_USER_DE)
@@ -654,6 +789,7 @@ class AppsRepo @Inject constructor(
             cloudRepo.upload(client = client, src = tmpJsonPath, dstDir = src)
             rootService.deleteRecursively(tmpDir)
             client.renameTo(src, dst)
+            refreshCloudIndex(client, entity)
         }
     }.withLog()
 
@@ -684,6 +820,7 @@ class AppsRepo @Inject constructor(
                 client.deleteRecursively(src)
                 if (client.exists(src).not()) {
                     appsDao.delete(app.id)
+                    refreshCloudIndex(client, entity)
                 }
             }
         }

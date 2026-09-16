@@ -4,10 +4,12 @@ import android.annotation.SuppressLint
 import com.xayah.core.common.util.toLineString
 import com.xayah.core.datastore.readBackupConfigs
 import com.xayah.core.datastore.readBackupItself
+import com.xayah.core.datastore.readBackupRetainCopies
 import com.xayah.core.datastore.readKillAppOption
 import com.xayah.core.datastore.readResetBackupList
 import com.xayah.core.datastore.saveLastBackupTime
 import com.xayah.core.model.DataType
+import com.xayah.core.model.DefaultPreserveId
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
 import com.xayah.core.model.ProcessingInfoType
@@ -104,6 +106,9 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
     protected open suspend fun onConfigsSaved(path: String, entity: ProcessingInfoEntity) {}
     protected open suspend fun onIconsSaved(path: String, entity: ProcessingInfoEntity) {}
     protected open suspend fun clear() {}
+    protected open suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = true
+    protected open suspend fun onDeleteCopy(copy: PackageEntity): Boolean = true
+    protected open suspend fun onIndexManifestSaved() {}
 
     protected abstract val mPackagesBackupUtil: PackagesBackupUtil
 
@@ -130,6 +135,33 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
             }
 
             else -> {}
+        }
+    }
+
+    /**
+     * 多副本轮转：备份前将现有主备份转为时间戳副本，并按保留数清理最旧副本。
+     * 轮转失败静默降级为覆盖式备份。
+     */
+    private suspend fun rotateCopies(p: PackageEntity, dstDir: String) {
+        val retainCopies = mContext.readBackupRetainCopies().first()
+        if (retainCopies <= 1) return
+
+        val mainEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, DefaultPreserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir) ?: return
+
+        // 清理超出保留数的最旧副本
+        mPackageDao.queryPackages(OpType.RESTORE, mTaskEntity.cloud, mTaskEntity.backupDir)
+            .filter { it.packageName == p.packageName && it.userId == p.userId && it.preserveId != DefaultPreserveId }
+            .sortedByDescending { it.extraInfo.lastBackupTime }
+            .drop(retainCopies - 1)
+            .forEach { copy ->
+                if (onDeleteCopy(copy)) mPackageDao.delete(copy.id)
+            }
+
+        // 主备份轮转为时间戳副本，本次备份将产出新主备份
+        val rotated = mainEntity.copy(id = 0, indexInfo = mainEntity.indexInfo.copy(preserveId = DateUtil.getTimestamp()))
+        if (onRotateCopy(src = mainEntity, dst = rotated)) {
+            mPackageDao.delete(mainEntity.id)
+            mPackageDao.upsert(rotated)
         }
     }
 
@@ -160,6 +192,7 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 val dstDir = "${mAppsDir}/${p.archivesRelativeDir}"
                 var restoreEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, p.preserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir)
                 mRootService.mkdirs(dstDir)
+                runCatchingOnService { rotateCopies(p = p, dstDir = dstDir) }
                 if (onAppDirCreated(archivesRelativeDir = p.archivesRelativeDir)) {
                     backup(type = DataType.PACKAGE_APK, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
                     backup(type = DataType.PACKAGE_USER, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
@@ -281,6 +314,9 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 }
                 if (mContext.readResetBackupList().first() && mTaskEntity.failureCount == 0) {
                     mPackageDao.clearActivated(OpType.BACKUP)
+                }
+                if (runCatchingOnService { onIndexManifestSaved() }.not()) {
+                    isSuccess = false
                 }
                 if (runCatchingOnService { clear() }.not()) {
                     isSuccess = false

@@ -396,6 +396,14 @@
     <string name="compression_level">压缩等级</string>
     <string name="compression_level_desc">数字越小，压缩速度越快，数字越大，压缩率越高</string>
     <string name="args_current_level">当前等级：%1$s</string>
+    <string name="last_backup_time">上次备份时间</string>
+    <string name="apps_with_new_local_versions">本机有新版本的应用</string>
+    <string name="apps_with_new_cloud_versions">云端有新版本的应用</string>
+    <string name="backup_version">备份版本</string>
+    <string name="local_version">本机版本</string>
+    <string name="backup_retain_copies">备份副本保留数</string>
+    <string name="backup_retain_copies_desc">为每个应用保留多份备份副本，超出保留数的最旧副本将被轮转清理</string>
+    <string name="args_current_copies">当前：%1$d 份</string>
     <string name="last_update">最近更新</string>
     <string name="welcome_screen_app_desc">享受无忧备份，使用简单，完全免费，轻松保护您的数据安全</string>
     <string name="get_started">立刻开始</string>

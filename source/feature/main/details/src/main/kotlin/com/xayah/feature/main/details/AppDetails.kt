@@ -23,10 +23,12 @@ import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material.icons.rounded.RocketLaunch
+import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material.icons.rounded._123
 import androidx.compose.material3.AssistChip
@@ -136,7 +138,7 @@ internal fun AppDetails(
 
         BackupParts(app = app, isCalculating = uiState.isRefreshing, onSetDataStates = onSetDataStates)
 
-        Info(app = app)
+        Info(app = app, counterpart = uiState.counterpart)
 
         Permissions(permissions = app.extraInfo.permissions)
     }
@@ -460,7 +462,7 @@ private fun BackupParts(app: PackageEntity, isCalculating: Boolean, onSetDataSta
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun Info(app: PackageEntity) {
+private fun Info(app: PackageEntity, counterpart: PackageEntity?) {
     Title(title = stringResource(id = R.string.info)) {
         Clickable(
             icon = ImageVector.vectorResource(id = R.drawable.ic_rounded_person),
@@ -477,6 +479,14 @@ private fun Info(app: PackageEntity) {
             title = stringResource(id = R.string.version),
             value = app.packageInfo.versionName
         )
+        // 对侧版本：备份页展示最近一次备份版本，恢复页展示本机已安装版本
+        if (counterpart != null) {
+            Clickable(
+                icon = if (app.indexInfo.opType == OpType.BACKUP) Icons.Rounded.CloudDownload else Icons.Rounded.Smartphone,
+                title = stringResource(id = if (app.indexInfo.opType == OpType.BACKUP) R.string.backup_version else R.string.local_version),
+                value = counterpart.packageInfo.versionName
+            )
+        }
         if (app.packageInfo.firstInstallTime != 0L) {
             Clickable(
                 icon = Icons.Rounded.Download,

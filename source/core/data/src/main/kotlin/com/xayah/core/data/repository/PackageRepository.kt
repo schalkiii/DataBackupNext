@@ -96,6 +96,11 @@ class PackageRepository @Inject constructor(
         runCatching { p.userId == userId }.getOrDefault(false)
     }
 
+    // 筛选"有更新"：勾选时仅保留待更新集合（备份页=本机版本更高，恢复页=云端版本更高）
+    fun getUpdatedPredicate(value: Boolean, outdatedSet: Set<String>): (PackageEntity) -> Boolean = { p ->
+        value.not() || p.pkgUserKey in outdatedSet
+    }
+
     private fun sortByInstallTimeNew(type: SortType): Comparator<PackageEntity> = when (type) {
         SortType.ASCENDING -> {
             compareBy { p -> p.packageInfo.firstInstallTime }
@@ -113,6 +118,16 @@ class PackageRepository @Inject constructor(
 
         SortType.DESCENDING -> {
             compareByDescending { p -> p.storageStatsBytes }
+        }
+    }
+
+    private fun sortByLastBackupTimeNew(type: SortType): Comparator<PackageEntity> = when (type) {
+        SortType.ASCENDING -> {
+            compareBy { p -> p.extraInfo.lastBackupTime }
+        }
+
+        SortType.DESCENDING -> {
+            compareByDescending { p -> p.extraInfo.lastBackupTime }
         }
     }
 
@@ -139,6 +154,7 @@ class PackageRepository @Inject constructor(
     fun getSortComparatorNew(sortIndex: Int, sortType: SortType): Comparator<in PackageEntity> = when (sortIndex) {
         1 -> sortByInstallTimeNew(sortType)
         2 -> sortByDataSizeNew(sortType)
+        3 -> sortByLastBackupTimeNew(sortType)
         else -> sortByAlphabetNew(sortType)
     }
 

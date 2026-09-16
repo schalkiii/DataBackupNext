@@ -71,6 +71,9 @@
     <item name="compression_level" type="string" />
     <item name="compression_level_desc" type="string" />
     <item name="args_current_level" type="string" />
+    <item name="backup_retain_copies" type="string" />
+    <item name="backup_retain_copies_desc" type="string" />
+    <item name="args_current_copies" type="string" />
 
     <item name="ic_rounded_acute" type="drawable" />
     <item name="ic_rounded_history" type="drawable" />

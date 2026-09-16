@@ -15,6 +15,7 @@ appcompat = "1.7.0"
 androidx-test-ext-junit = "1.2.1"
 espresso-core = "3.6.1"
 junit = "4.13.2"
+mockk = "1.13.13"
 compose-bom = "2024.12.01"
 core-ktx = "1.15.0"
 core-splashscreen = "1.0.1"
@@ -90,6 +91,7 @@ refine-annotation = { module = "dev.rikka.tools.refine:annotation", version.ref 
 refine-annotation-processor = { module = "dev.rikka.tools.refine:annotation-processor", version.ref = "refine" }
 espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso-core" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil-compose" }
 dotlottie-android = { module = "com.github.LottieFiles:dotlottie-android", version.ref = "dotlottie-android" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }

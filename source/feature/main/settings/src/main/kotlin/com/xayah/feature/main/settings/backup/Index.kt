@@ -27,8 +27,10 @@ import com.xayah.core.datastore.KeyBackupItself
 import com.xayah.core.datastore.KeyCheckKeystore
 import com.xayah.core.datastore.KeyCompressionTest
 import com.xayah.core.datastore.KeyFollowSymlinks
+import com.xayah.core.datastore.readBackupRetainCopies
 import com.xayah.core.datastore.readCompressionLevel
 import com.xayah.core.datastore.readKillAppOption
+import com.xayah.core.datastore.saveBackupRetainCopies
 import com.xayah.core.datastore.saveCompressionLevel
 import com.xayah.core.datastore.saveKillAppOption
 import com.xayah.core.model.KillAppOption
@@ -79,6 +81,19 @@ fun PageBackupSettings() {
                 ) {
                     scope.launch {
                         context.saveCompressionLevel(it.roundToInt())
+                    }
+                }
+
+                val retainCopies by context.readBackupRetainCopies().collectAsStateWithLifecycle(initialValue = 1)
+                Slideable(
+                    title = stringResource(id = R.string.backup_retain_copies),
+                    value = retainCopies.toFloat(),
+                    valueRange = 1F..10F,
+                    steps = 8,
+                    desc = remember(retainCopies) { "${context.getString(R.string.args_current_copies, retainCopies)}\n${context.getString(R.string.backup_retain_copies_desc)}" }
+                ) {
+                    scope.launch {
+                        context.saveBackupRetainCopies(it.roundToInt())
                     }
                 }
 

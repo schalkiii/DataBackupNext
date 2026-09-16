@@ -27,6 +27,8 @@
     <item name="user" type="string" />
     <item name="uid" type="string" />
     <item name="version" type="string" />
+    <item name="backup_version" type="string" />
+    <item name="local_version" type="string" />
     <item name="first_install" type="string" />
     <item name="granted" type="string" />
     <item name="denied" type="string" />

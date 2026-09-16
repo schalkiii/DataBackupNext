@@ -407,6 +407,14 @@
     <string name="compression_level">Compression level</string>
     <string name="compression_level_desc">Lower numbers provide faster compression, higher numbers yield better compression ratios</string>
     <string name="args_current_level">Current level: %1$s</string>
+    <string name="last_backup_time">Last backup time</string>
+    <string name="apps_with_new_local_versions">Apps with newer local versions</string>
+    <string name="apps_with_new_cloud_versions">Apps with newer cloud backup versions</string>
+    <string name="backup_version">Backup version</string>
+    <string name="local_version">Local version</string>
+    <string name="backup_retain_copies">Backup copies to retain</string>
+    <string name="backup_retain_copies_desc">Keep multiple copies per app, oldest ones beyond the limit will be rotated out</string>
+    <string name="args_current_copies">Current: %1$d copies</string>
     <string name="last_update">Last update</string>
     <string name="welcome_screen_app_desc">Enjoy hassle-free backups with DataBackup. It’s simple to use and completely FOSS. Keep your data safe without the stress</string>
     <string name="get_started">Get started</string>

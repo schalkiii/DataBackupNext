@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.library.common)
     alias(libs.plugins.library.hilt)
     alias(libs.plugins.library.protobuf)
-    alias(libs.plugins.library.androidTest)
+    alias(libs.plugins.library.test)
     alias(libs.plugins.library.compose)
     alias(libs.plugins.refine)
 }
@@ -37,4 +37,7 @@ dependencies {
 
     // Work manager
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Test
+    testImplementation(libs.mockk)
 }

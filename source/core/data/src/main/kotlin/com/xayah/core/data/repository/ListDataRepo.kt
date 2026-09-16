@@ -43,7 +43,7 @@ class ListDataRepo @Inject constructor(
     private lateinit var userList: Flow<List<UserInfo>>
     private lateinit var userMap: Flow<Map<Int, Long>>
     private lateinit var appList: Flow<List<App>>
-    private lateinit var pkgUserSet: Flow<Set<String>> // "${pkgName}-${userId}"
+    private lateinit var pkgUserVersions: Flow<Map<String, Long>> // "${pkgName}-${userId}" -> 版本码（备份页=备份版本，恢复页=本机版本）
     private lateinit var labelAppRefs: Flow<List<LabelAppCrossRefEntity>> // Labels filtered app refs
 
     // Files
@@ -78,6 +78,7 @@ class ListDataRepo @Inject constructor(
                         hasNoBackups = true,
                         installedApps = true,
                         notInstalledApps = true,
+                        updatedApps = false,
                     )
                 )
                 userIndex = MutableStateFlow(0)
@@ -85,16 +86,16 @@ class ListDataRepo @Inject constructor(
                 userMap = usersRepo.getUsersMap(opType, cloudName, backupDir)
 
                 listData = getAppListData()
-                pkgUserSet = when (opType) {
+                pkgUserVersions = when (opType) {
                     OpType.BACKUP -> {
                         appsRepo.getBackups(filters)
                     }
 
                     OpType.RESTORE -> {
-                        appsRepo.getInstalledApps(userList)
+                        appsRepo.getInstalledVersions(userList)
                     }
                 }
-                appList = appsRepo.getApps(opType = opType, listData = listData, pkgUserSet = pkgUserSet, refs = labelAppRefs, labels = labels, cloudName = cloudName, backupDir = backupDir)
+                appList = appsRepo.getApps(opType = opType, listData = listData, pkgUserVersions = pkgUserVersions, refs = labelAppRefs, labels = labels, cloudName = cloudName, backupDir = backupDir)
             }
 
             Target.Files -> {
@@ -205,6 +206,7 @@ data class Filters(
     val hasNoBackups: Boolean,
     val installedApps: Boolean,
     val notInstalledApps: Boolean,
+    val updatedApps: Boolean,
 )
 
 sealed class ListData(

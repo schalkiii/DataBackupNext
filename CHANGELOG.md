@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+
+### Features
+
+* **apps:** Updated apps detection — filter apps whose installed version is newer than the backed-up one
+* **apps:** Sort apps by last backup time (ascending/descending)
+* **cloud:** Incremental list sync via `apps_index.json` manifest — single download replaces per-app remote queries, with graceful fallback to full scan
+* **backup:** Configurable multiple backup copies (log-rotation style retention, default 1 for backward compatibility)
+* **apps:** Restore view now supports "cloud has newer version" filter (cloud backup version newer than installed)
+* **apps:** App details show the counterpart version — latest backup version on backup view, installed local version on restore view
+
+
+### Bug Fixes
+
+* **apps:** Invert "updated apps" filter semantics and default to unchecked — checking the box now correctly keeps only apps with newer versions
+* **apps:** Restore details showed 0 bytes per data item for cloud entities — sizes are now preset from the manifest and on-demand local recalculation is skipped for cloud entries
+
+
+### Test
+
+* Add unit tests for backup status aggregation, cloud index manifest serialization and package predicates (20 cases)
+* Add unit tests for backup index baseline aggregation on backup/restore scenarios (4 cases)
+
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)
 
 

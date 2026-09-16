@@ -51,9 +51,9 @@ class DetailsViewModel @Inject constructor(
 
     val uiState: StateFlow<DetailsUiState> = when (target) {
         Target.Apps -> {
-            combine(appsRepo.getApp(id), isRefreshing, labelsRepo.getLabelsFlow(), labelsRepo.getAppRefsFlow()) { app, isRefreshing, labels, refs ->
+            combine(appsRepo.getApp(id), appsRepo.getAppCounterpart(id), isRefreshing, labelsRepo.getLabelsFlow(), labelsRepo.getAppRefsFlow()) { app, counterpart, isRefreshing, labels, refs ->
                 if (app != null) {
-                    Success.App(uuid = UUID.randomUUID(), isRefreshing = isRefreshing, labels = labels, app = app, refs = refs.filter { ref ->
+                    Success.App(uuid = UUID.randomUUID(), isRefreshing = isRefreshing, labels = labels, app = app, counterpart = counterpart, refs = refs.filter { ref ->
                         labels.find { it.label == ref.label } != null && ref.packageName == app.packageName && ref.userId == app.userId && ref.preserveId == app.preserveId
                     })
                 } else {
@@ -278,6 +278,7 @@ sealed interface DetailsUiState {
             override val isRefreshing: Boolean,
             override val labels: List<LabelEntity>,
             val app: PackageEntity,
+            val counterpart: PackageEntity?,
             val refs: List<LabelAppCrossRefEntity>,
         ) : Success(uuid, isRefreshing, labels)
 
