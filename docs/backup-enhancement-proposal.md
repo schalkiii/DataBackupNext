@@ -1276,3 +1276,18 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 - **Kotlin 编译守护进程残留**：lint/编译多次 "daemon disappeared" 的直接诱因是两个残留 `KotlinCompileDaemon` 进程合计占用约 2GB——对 D.7 经验的补充：除了 `pkill -9 -f gradle`，还需 `pkill -9 -f KotlinCompileDaemon`，释放后可用内存从 2.6G 恢复至 4.6G，lint 即可稳定通过；
 - **Lint 依赖需联网**：`--offline` 模式无 `lint-gradle` 缓存，需临时在 `gradle.properties` 写入 `systemProp.http(s).proxyHost/Port` 走沙箱代理拉取，完成后必须回退（勿提交代理配置）；
 - **内存受限下的 Lint 策略**：`jvmargs` 临时降至 1536m、`org.gradle.parallel` 临时关闭、`-Dorg.gradle.workers.max=1`、按模块分批执行，可在 5.8G 无 Swap 沙箱内完成全模块 lint。
+
+### F.8 交付与遗留事项（2025-09-16 第二轮收尾）
+
+**交付物清单**（/workspace）：
+
+| 交付物 | 说明 |
+|---|---|
+| `apk/DataBackup-2.0.12-arm64-v8a-foss-debug.apk` | 含第二轮四项增强的测试 APK（md5 833a7c513fa9eb363a0d71d8f3379ebc，36MB） |
+| `DataBackupNext-repo/` | 完整 git 仓库（最新提交 5a3af27b，remote 已指向 GitHub） |
+| `backup-enhancement-proposal.md` | 本提案（含附录 A-F 实施记录） |
+
+**遗留事项**：
+
+- 沙箱内仍无 GitHub 凭证（gh CLI / GITHUB_TOKEN / credential helper 均缺失），push 无法执行——与第一轮相同，用户侧在 repo 目录执行 `git push origin main` 即可；
+- 测试基线更新：core:data 13 用例（谓词 8 + 基线聚合 4 + 副本筛选 1）+ core:model 16 用例（状态 6 + 清单 5 + 版本差 4 + 1），共 29 例全绿。
