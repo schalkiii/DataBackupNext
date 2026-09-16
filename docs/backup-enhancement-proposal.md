@@ -1289,5 +1289,5 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 **遗留事项**：
 
-- 沙箱内仍无 GitHub 凭证（gh CLI / GITHUB_TOKEN / credential helper 均缺失），push 无法执行——与第一轮相同，用户侧在 repo 目录执行 `git push origin main` 即可；
+- ~~沙箱内无 GitHub 凭证，push 无法执行~~ 已解决（2026-09-16）：用户提供细粒度 PAT 后完成推送，远端 `main` 已更新至 9a300e71（token 仅在推送命令中内联使用，未持久化到任何配置或文件）；
 - 测试基线更新：core:data 13 用例（谓词 8 + 基线聚合 4 + 副本筛选 1）+ core:model 16 用例（状态 6 + 清单 5 + 版本差 4 + 1），共 29 例全绿。
