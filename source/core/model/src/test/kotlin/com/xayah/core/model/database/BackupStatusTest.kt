@@ -47,18 +47,20 @@ class BackupStatusTest {
 
     @Test
     fun `当前版本高于备份版本时判定为待更新`() {
-        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 10L, copyCount = 3)
+        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 10L, backedUpVersionName = "1.0", copyCount = 3)
         val app = buildEntity(versionCode = 11L).toAppWithStatus(index = index)
 
         assertTrue(app.isOutdated)
         assertEquals(100L, app.lastBackupTime)
         assertEquals(10L, app.backedUpVersionCode)
         assertEquals(3, app.copyCount)
+        assertEquals("1.0", app.versionName)
+        assertEquals("1.0", app.backedUpVersionName)
     }
 
     @Test
     fun `当前版本等于备份版本时判定为非待更新`() {
-        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 11L, copyCount = 1)
+        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 11L, backedUpVersionName = "1.1", copyCount = 1)
         val app = buildEntity(versionCode = 11L).toAppWithStatus(index = index)
 
         assertFalse(app.isOutdated)
@@ -66,7 +68,7 @@ class BackupStatusTest {
 
     @Test
     fun `当前版本低于备份版本时判定为非待更新`() {
-        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 12L, copyCount = 1)
+        val index = BackupIndex(lastBackupTime = 100L, backedUpVersionCode = 12L, backedUpVersionName = "1.2", copyCount = 1)
         val app = buildEntity(versionCode = 11L).toAppWithStatus(index = index)
 
         assertFalse(app.isOutdated)

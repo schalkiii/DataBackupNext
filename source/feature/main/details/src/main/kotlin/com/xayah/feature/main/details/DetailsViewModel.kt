@@ -22,6 +22,7 @@ import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.util.decodeURL
 import com.xayah.core.util.launchOnDefault
+import com.xayah.core.util.module.combine
 import com.xayah.core.util.withMainContext
 import com.xayah.feature.main.details.DetailsUiState.Error
 import com.xayah.feature.main.details.DetailsUiState.Loading
@@ -51,9 +52,9 @@ class DetailsViewModel @Inject constructor(
 
     val uiState: StateFlow<DetailsUiState> = when (target) {
         Target.Apps -> {
-            combine(appsRepo.getApp(id), appsRepo.getAppCounterpart(id), isRefreshing, labelsRepo.getLabelsFlow(), labelsRepo.getAppRefsFlow()) { app, counterpart, isRefreshing, labels, refs ->
+            combine(appsRepo.getApp(id), appsRepo.getAppCounterpart(id), appsRepo.getAppCopies(id), isRefreshing, labelsRepo.getLabelsFlow(), labelsRepo.getAppRefsFlow()) { app, counterpart, copies, isRefreshing, labels, refs ->
                 if (app != null) {
-                    Success.App(uuid = UUID.randomUUID(), isRefreshing = isRefreshing, labels = labels, app = app, counterpart = counterpart, refs = refs.filter { ref ->
+                    Success.App(uuid = UUID.randomUUID(), isRefreshing = isRefreshing, labels = labels, app = app, counterpart = counterpart, copies = copies, refs = refs.filter { ref ->
                         labels.find { it.label == ref.label } != null && ref.packageName == app.packageName && ref.userId == app.userId && ref.preserveId == app.preserveId
                     })
                 } else {
@@ -125,6 +126,25 @@ class DetailsViewModel @Inject constructor(
     fun setDataStates(id: Long, dataStates: PackageDataStates) {
         viewModelScope.launchOnDefault {
             appsRepo.setDataItems(listOf(id), dataStates)
+        }
+    }
+
+    /**
+     * 定点恢复：将恢复选择切换到指定历史副本（同组其余副本取消选择）。
+     */
+    fun restoreFromCopy(copyId: Long) {
+        viewModelScope.launchOnDefault {
+            when (uiState.value) {
+                is Success.App -> {
+                    val state = uiState.value.castTo<Success.App>()
+                    appsRepo.restoreFromCopy(state.app, copyId)
+                    withMainContext {
+                        Toast.makeText(context, context.getString(R.string.copy_selected_for_restore), Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                else -> {}
+            }
         }
     }
 
@@ -279,6 +299,7 @@ sealed interface DetailsUiState {
             override val labels: List<LabelEntity>,
             val app: PackageEntity,
             val counterpart: PackageEntity?,
+            val copies: List<PackageEntity> = listOf(), // 同组历史副本（含当前实体），按备份时间倒序
             val refs: List<LabelAppCrossRefEntity>,
         ) : Success(uuid, isRefreshing, labels)
 

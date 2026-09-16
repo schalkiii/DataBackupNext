@@ -68,6 +68,14 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :compare_arrows: **Counterpart version in details** — the app details page shows the other side's version: latest backup version on the backup view, installed local version on the restore view.
 
+* :bell: **Backup reminder badge** — the backup list subtitle shows the count of apps whose local version is newer than the backup, so pending refreshes are visible at a glance.
+
+* :history: **History copies & point-in-time restore** — the app details page (restore view) lists all copies of the same package with backup time; selecting a copy activates it as the restore target, and the previous active copy is deactivated automatically.
+
+* :floppy_disk: **Persistent filter conditions** — list filter states (backup view and restore view separately) are persisted in DataStore and restored on the next visit.
+
+* :arrow_right: **Inline version transition badge** — next to the update icon, the list item shows the version transition in a compact form (`1.0 → 1.2`): local → backup on the backup view, cloud → local on the restore view.
+
 See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D) and the future roadmap (appendix E).
 
 ## Screenshot

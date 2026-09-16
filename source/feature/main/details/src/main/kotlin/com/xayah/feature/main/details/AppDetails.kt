@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
@@ -103,6 +105,7 @@ internal fun AppDetails(
     onFreeze: (Boolean) -> Unit,
     onLaunch: () -> Unit,
     onProtect: () -> Unit,
+    onRestoreCopy: (Long) -> Unit,
     onDelete: () -> Unit
 ) {
     var isShow by remember { mutableStateOf(false) }
@@ -139,6 +142,8 @@ internal fun AppDetails(
         BackupParts(app = app, isCalculating = uiState.isRefreshing, onSetDataStates = onSetDataStates)
 
         Info(app = app, counterpart = uiState.counterpart)
+
+        HistoryCopies(app = app, copies = uiState.copies, onRestoreCopy = onRestoreCopy)
 
         Permissions(permissions = app.extraInfo.permissions)
     }
@@ -521,6 +526,28 @@ private fun Info(app: PackageEntity, counterpart: PackageEntity?) {
                 title = stringResource(id = R.string._protected),
                 value = DateUtil.formatTimestamp(app.preserveId, DateUtil.PATTERN_FINISH),
             )
+        }
+    }
+}
+
+/**
+ * 历史副本：仅恢复页且副本数大于 1 时展示，按备份时间倒序列出同组全部副本，
+ * 点击副本即切换定点恢复目标（已激活副本显示勾选图标）。
+ */
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun HistoryCopies(app: PackageEntity, copies: List<PackageEntity>, onRestoreCopy: (Long) -> Unit) {
+    if (app.indexInfo.opType == OpType.RESTORE && copies.size > 1) {
+        Title(title = stringResource(id = R.string.history_copies)) {
+            copies.forEach { copy ->
+                Clickable(
+                    icon = if (copy.extraInfo.activated) Icons.Rounded.CheckCircle else Icons.Outlined.History,
+                    title = DateUtil.formatTimestamp(copy.extraInfo.lastBackupTime, DateUtil.PATTERN_YMD_HMS),
+                    value = if (copy.id == app.id) stringResource(id = R.string.current_copy, copy.packageInfo.versionName) else copy.packageInfo.versionName,
+                    onClick = { onRestoreCopy(copy.id) }
+                )
+            }
+            Spacer(Modifier.height(SizeTokens.Level12))
         }
     }
 }

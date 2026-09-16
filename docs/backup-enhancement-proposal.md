@@ -1170,7 +1170,7 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 以下为基于现有架构梳理的实用性与易用性增强方向，按"落地成本-收益"排序，均为独立可实施项，依托本轮已落地的台账（`BackupIndex`）、版本基线（`pkgUserVersions`）与云端清单（`apps_index.json`）能力。
 
-### E.1 备份提醒角标（P0，推荐首批）
+### E.1 备份提醒角标（P0，推荐首批）✅ 已实施（附录 F.1，2025-09-16）
 
 **价值**：形成"检测 → 提醒 → 备份"闭环，放大本轮"有更新"检测的核心价值。
 
@@ -1178,15 +1178,17 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 **依托**：`outdatedSet` 现成；筛选机制（`Filters.updatedApps`）现成。
 
-### E.2 一键全选有更新（P0，推荐首批）
+### E.2 一键全选有更新（P0，推荐首批）❌ 经用户决策不实施
 
 **价值**：与 E.1 组合即为"增量备份"快捷入口——筛选出待更新应用后一键全选执行备份，减少逐个勾选。
+
+**决策记录**（2025-09-16）：现有"筛选有更新 + 全选"已覆盖该场景，单独入口属重复功能，经用户确认不做。
 
 **方案**：列表页多选模式（长按进入）增加快捷 Chip"选中所有有更新的应用"，实现上对当前过滤后的 `appList` 中 `isOutdated == true` 的条目批量 `setDataItems(activated = true)`。
 
 **依托**：`App.isOutdated` 派生字段已随列表下发；批量激活机制（`appsDao` upsert）现成。
 
-### E.3 副本浏览与定点恢复（P1）
+### E.3 副本浏览与定点恢复（P1）✅ 已实施（附录 F.2，2025-09-16）
 
 **价值**：多副本保留（F2）已落地但 UI 不可见——数据在库里，用户却无法选择"从哪个时间点恢复"。
 
@@ -1194,7 +1196,7 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 **依托**：轮转副本实体已在库（`rotateCopies` 产出）；恢复服务按实体执行，无需改造。
 
-### E.4 筛选条件持久化（P1）
+### E.4 筛选条件持久化（P1）✅ 已实施（附录 F.3，2025-09-16）
 
 **价值**：当前筛选退出即重置（`Filters` 每次初始化为默认值），高频用户每次都要重新勾选。
 
@@ -1202,15 +1204,17 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 **依托**：DataStore 读写模式现成。
 
-### E.5 云端空间统计（P2）
+### E.5 云端空间统计（P2）❌ 经用户决策不实施
 
 **价值**：回答"云端被什么占了"——方便用户清理低价值备份。
+
+**决策记录**（2025-09-16）：经用户确认本轮不实施（"云端空间统计"指云端配置维度，暂无诉求）。
 
 **方案**：云备份管理页增加占用视图：按应用聚合 `displayStats` 总量排行（清单已预置），展示 TopN 与总占用；可选按时间清理建议（如"超过 90 天未更新的副本"）。
 
 **依托**：`apps_index.json` 清单携带 `displayStats`；聚合纯本地计算。
 
-### E.6 行内版本差徽标（P2）
+### E.6 行内版本差徽标（P2）✅ 已实施（附录 F.4，2025-09-16）
 
 **价值**：比单独的 Update 图标更直观，一眼看出"从哪版到哪版"。
 
@@ -1220,8 +1224,55 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 ### E.7 实施批次建议
 
-| 批次 | 内容 | 理由 |
-|---|---|---|
-| 第一批 | E.1 + E.2 | 直接放大"有更新"检测价值，形成增量备份闭环 |
-| 第二批 | E.3 + E.4 | 补齐多副本可见性与操作记忆，中等工作量 |
-| 第三批 | E.5 + E.6 | 体验打磨项，独立无依赖 |
+| 批次 | 内容 | 理由 | 状态 |
+|---|---|---|---|
+| 第一批 | E.1 + E.2 | 直接放大"有更新"检测价值，形成增量备份闭环 | E.1 已实施（F.1）；E.2 经用户决策不做 |
+| 第二批 | E.3 + E.4 | 补齐多副本可见性与操作记忆，中等工作量 | 均已实施（F.2/F.3） |
+| 第三批 | E.5 + E.6 | 体验打磨项，独立无依赖 | E.6 已实施（F.4）；E.5 经用户决策不做 |
+
+## 附录 F：第二轮增强实施（2025-09-16）
+
+第二轮按用户指令实施 E.1 / E.3 / E.4 / E.6 四项（E.2、E.5 经用户决策不实施），全部依托既有台账与版本基线能力，无新增数据库表。
+
+### F.1 备份提醒角标（E.1 落地）
+
+- **数据链路**：`AppsRepo.countOutdatedBackupApps(cloudName, backupDir)` 聚合 RESTORE 实体派生台账后统计"本机版本高于备份版本"的应用数；`ListDataRepo.outdatedCount` 仅在备份页接流，恢复页置 `flowOf(0L)` 避免无效计算；
+- **状态下发**：`ListData.Apps` 新增 `outdatedCount` 字段随 `combine` 下发；`ListTopBar` 副标题追加"N 个应用有更新"文案（`format_x_apps_have_updates`）；
+- **前置改造**：`getAppListData` 的 combine 流从 13 个增至 14 个，为此在 `core/util/.../FlowUtil.kt` 按既有 Triple 分组模式追加 T14 重载（见 F.7 踩坑记录）。
+
+### F.2 副本浏览与定点恢复（E.3 落地）
+
+- **副本查询**：`AppsRepo.getAppCopies(id)` 取同 `pkgUserKey`、同云端作用域（cloud + backupDir）的全部 RESTORE 实体，经 `selectCopiesOf` 扩展函数过滤并按 `lastBackupTime` 倒序；
+- **定点激活**：`AppsRepo.restoreFromCopy(app, copyId)` 先批量反选同组副本再激活目标副本，保证恢复队列中同组仅一个副本生效；
+- **UI**：`AppDetails` 新增 HistoryCopies 区块，仅恢复页且副本数 > 1 时展示；每行显示备份时间与版本名，已激活副本以勾选图标标识，点击即切换定点恢复目标（当前实体行标注"当前副本"）。
+
+### F.3 筛选条件持久化（E.4 落地）
+
+- **存储**：DataStore 新增 6 个布尔键，按操作类型分键（`filter_backup_*` / `filter_restore_*`），默认值与既有 UI 初值一致（`updatedApps` 默认 false）；
+- **读写**：`ListDataRepo.initialize` 经 `runBlocking { ...first() }` 读取恢复（对齐 `getLoadSystemApps` 模式）；`setFilters` 内按 `appsOpType` 分键写回；
+- **边界**：`showSystemApps` 沿用既有全局键不参与分键；云端/目录作用域参数不持久化（跟随导航上下文）。
+
+### F.4 行内版本差徽标（E.6 落地）
+
+- **模型**：`App` 新增 `versionName`（实体侧）与 `backedUpVersionName`（台账对侧），`BackupIndex` 同步冗余 `backedUpVersionName`；
+- **文案**：`App.buildVersionTransition(opType, app)` 统一生成"本机 → 备份"（备份页）/"云端 → 本机"（恢复页）文本，非待更新或任一侧版本名缺失时返回 null 降级为仅图标；
+- **UI**：`ListItems` 的 AppItem 在 Update 图标旁以 `LabelSmallText` 展示微缩版本差文本。
+
+### F.5 验证
+
+- 单元测试：全模块 29 用例全绿（新增 5 例：`VersionTransitionTest` 4 例覆盖双向文本与非降级路径、`AppsRepoBackupIndexTest` 新增同键副本过滤排序 1 例）；
+- Lint：`core:model` / `core:data` / `core:datastore` / `core:util` / `feature:main:details` / `feature:main:list` / `app:lintArm64-v8aFossDebug` 全部通过；
+- 编译：`assembleArm64-v8aFossDebug` BUILD SUCCESSFUL，36MB。
+
+### F.6 本轮改动文件
+
+- 修改：`core/model/.../App.kt`、`core/model/database/PackageEntity.kt`、`core/data/.../AppsRepo.kt`、`core/data/.../ListDataRepo.kt`、`core/datastore/.../Boolean.kt`、`core/util/.../FlowUtil.kt`、`feature/main/details/.../AppDetails.kt`、`DetailsScreen.kt`、`DetailsViewModel.kt`、`feature/main/details/src/main/res/values/ids.xml`、`feature/main/list/.../ListItems.kt`、`ListTopBar.kt`、`ListTopBarViewModel.kt`、`feature/main/list/src/main/res/values/ids.xml`、`app/src/main/res/values/strings.xml`、`app/src/main/res/values-zh-rCN/strings.xml`
+- 新增测试：`core/model/src/test/.../VersionTransitionTest.kt`；扩充：`AppsRepoBackupIndexTest.kt`
+
+### F.7 复盘与踩坑记录（2025-09-16 第二轮）
+
+- **combine 参数上限**：`FlowUtil.kt` 自定义 combine 最高 13 参数，新增流超出后 Kotlin 静默解析到 kotlinx 的 vararg 重载并报"Cannot infer type"——应在 FlowUtil 按既有 Triple 分组模式扩展对应参数数的重载，而非改用嵌套 combine；
+- **DataStore 单值读取**：`readStoreBoolean` 返回 `Flow<Boolean>`，`runBlocking` 内直接调用得到的是 Flow 对象而非值，必须 `.first()`（对齐 `getLoadSystemApps` 既有模式）；
+- **Kotlin 编译守护进程残留**：lint/编译多次 "daemon disappeared" 的直接诱因是两个残留 `KotlinCompileDaemon` 进程合计占用约 2GB——对 D.7 经验的补充：除了 `pkill -9 -f gradle`，还需 `pkill -9 -f KotlinCompileDaemon`，释放后可用内存从 2.6G 恢复至 4.6G，lint 即可稳定通过；
+- **Lint 依赖需联网**：`--offline` 模式无 `lint-gradle` 缓存，需临时在 `gradle.properties` 写入 `systemProp.http(s).proxyHost/Port` 走沙箱代理拉取，完成后必须回退（勿提交代理配置）；
+- **内存受限下的 Lint 策略**：`jvmargs` 临时降至 1536m、`org.gradle.parallel` 临时关闭、`-Dorg.gradle.workers.max=1`、按模块分批执行，可在 5.8G 无 Swap 沙箱内完成全模块 lint。

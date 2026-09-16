@@ -1,5 +1,6 @@
 package com.xayah.core.data.repository
 
+import android.content.Context
 import com.xayah.core.model.App
 import com.xayah.core.model.File
 import com.xayah.core.model.OpType
@@ -8,10 +9,26 @@ import com.xayah.core.model.Target
 import com.xayah.core.model.UserInfo
 import com.xayah.core.model.database.LabelAppCrossRefEntity
 import com.xayah.core.model.database.LabelFileCrossRefEntity
+import com.xayah.core.model.database.VersionInfo
 import com.xayah.core.util.module.combine
+import dagger.hilt.android.qualifiers.ApplicationContext
+import com.xayah.core.datastore.readFilterBackupHasBackups
+import com.xayah.core.datastore.readFilterBackupHasNoBackups
+import com.xayah.core.datastore.readFilterBackupUpdatedApps
+import com.xayah.core.datastore.readFilterRestoreInstalledApps
+import com.xayah.core.datastore.readFilterRestoreNotInstalledApps
+import com.xayah.core.datastore.readFilterRestoreUpdatedApps
+import com.xayah.core.datastore.saveFilterBackupHasBackups
+import com.xayah.core.datastore.saveFilterBackupHasNoBackups
+import com.xayah.core.datastore.saveFilterBackupUpdatedApps
+import com.xayah.core.datastore.saveFilterRestoreInstalledApps
+import com.xayah.core.datastore.saveFilterRestoreNotInstalledApps
+import com.xayah.core.datastore.saveFilterRestoreUpdatedApps
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
@@ -19,6 +36,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ListDataRepo @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val usersRepo: UsersRepo,
     private val appsRepo: AppsRepo,
     private val filesRepo: FilesRepo,
@@ -37,13 +55,15 @@ class ListDataRepo @Inject constructor(
     private lateinit var labels: MutableStateFlow<Set<String>>
 
     // Apps
+    private lateinit var appsOpType: OpType // 筛选持久化按操作类型分键
     private lateinit var showDataItemsSheet: MutableStateFlow<Boolean>
     private lateinit var filters: MutableStateFlow<Filters>
     private lateinit var userIndex: MutableStateFlow<Int>
     private lateinit var userList: Flow<List<UserInfo>>
     private lateinit var userMap: Flow<Map<Int, Long>>
     private lateinit var appList: Flow<List<App>>
-    private lateinit var pkgUserVersions: Flow<Map<String, Long>> // "${pkgName}-${userId}" -> 版本码（备份页=备份版本，恢复页=本机版本）
+    private lateinit var outdatedCount: Flow<Long> // 备份提醒角标：待更新应用数（仅备份页有值）
+    private lateinit var pkgUserVersions: Flow<Map<String, VersionInfo>> // "${pkgName}-${userId}" -> 版本信息（备份页=备份版本，恢复页=本机版本）
     private lateinit var labelAppRefs: Flow<List<LabelAppCrossRefEntity>> // Labels filtered app refs
 
     // Files
@@ -53,6 +73,7 @@ class ListDataRepo @Inject constructor(
     fun initialize(target: Target, opType: OpType, cloudName: String, backupDir: String) {
         when (target) {
             Target.Apps -> {
+                appsOpType = opType
                 selected = appsRepo.countSelectedApps(opType)
                 total = appsRepo.countApps(opType)
                 searchQuery = MutableStateFlow("")
@@ -69,21 +90,30 @@ class ListDataRepo @Inject constructor(
                 }
 
                 showDataItemsSheet = MutableStateFlow(false)
+                // 筛选条件持久化：进入列表时恢复上次选择（按操作类型分键读取）
                 filters = MutableStateFlow(
                     Filters(
                         cloud = cloudName,
                         backupDir = backupDir,
                         showSystemApps = runBlocking { appsRepo.getLoadSystemApps() },
-                        hasBackups = true,
-                        hasNoBackups = true,
-                        installedApps = true,
-                        notInstalledApps = true,
-                        updatedApps = false,
+                        hasBackups = runBlocking { context.readFilterBackupHasBackups().first() },
+                        hasNoBackups = runBlocking { context.readFilterBackupHasNoBackups().first() },
+                        installedApps = runBlocking { context.readFilterRestoreInstalledApps().first() },
+                        notInstalledApps = runBlocking { context.readFilterRestoreNotInstalledApps().first() },
+                        updatedApps = when (opType) {
+                            OpType.BACKUP -> runBlocking { context.readFilterBackupUpdatedApps().first() }
+                            OpType.RESTORE -> runBlocking { context.readFilterRestoreUpdatedApps().first() }
+                        },
                     )
                 )
                 userIndex = MutableStateFlow(0)
                 userList = usersRepo.getUsers(opType)
                 userMap = usersRepo.getUsersMap(opType, cloudName, backupDir)
+                // 备份提醒角标仅统计备份页（本机版本高于备份版本）
+                outdatedCount = when (opType) {
+                    OpType.BACKUP -> appsRepo.countOutdatedBackupApps(cloudName, backupDir)
+                    OpType.RESTORE -> flowOf(0L)
+                }
 
                 listData = getAppListData()
                 pkgUserVersions = when (opType) {
@@ -134,8 +164,9 @@ class ListDataRepo @Inject constructor(
         userIndex,
         userList,
         userMap,
-    ) { s, t, sQuery, sFSheet, sIndex, sType, iUpdating, lIds, sDISheet, filters, uIndex, uList, uMap ->
-        ListData.Apps(s, t, sQuery, sFSheet, sIndex, sType, iUpdating, lIds, sDISheet, filters, uIndex, uList, uMap)
+        outdatedCount,
+    ) { s, t, sQuery, sFSheet, sIndex, sType, iUpdating, lIds, sDISheet, filters, uIndex, uList, uMap, oCount ->
+        ListData.Apps(s, t, sQuery, sFSheet, sIndex, sType, iUpdating, lIds, sDISheet, filters, uIndex, uList, uMap, oCount)
     }
 
     private fun getFileListData(): Flow<ListData.Files> = combine(
@@ -159,6 +190,21 @@ class ListDataRepo @Inject constructor(
 
     suspend fun setFilters(block: (Filters) -> Filters) {
         filters.emit(block(filters.value))
+        // 筛选条件持久化：按操作类型分键写入，下次进入列表时恢复
+        val current = filters.value
+        when (appsOpType) {
+            OpType.BACKUP -> {
+                context.saveFilterBackupHasBackups(current.hasBackups)
+                context.saveFilterBackupHasNoBackups(current.hasNoBackups)
+                context.saveFilterBackupUpdatedApps(current.updatedApps)
+            }
+
+            OpType.RESTORE -> {
+                context.saveFilterRestoreInstalledApps(current.installedApps)
+                context.saveFilterRestoreNotInstalledApps(current.notInstalledApps)
+                context.saveFilterRestoreUpdatedApps(current.updatedApps)
+            }
+        }
     }
 
     suspend fun setSortIndex(block: (Int) -> Int) {
@@ -233,6 +279,7 @@ sealed class ListData(
         val userIndex: Int,
         val userList: List<UserInfo>,
         val userMap: Map<Int, Long>,
+        val outdatedCount: Long = 0L, // 备份提醒角标：待更新应用数（仅备份页有值）
     ) : ListData(selected, total, searchQuery, showFilterSheet, sortIndex, sortType, isUpdating, labels)
 
     data class Files(

@@ -41,6 +41,7 @@ class ListTopBarViewModel @Inject constructor(
                 userIndex = listData.userIndex,
                 userList = listData.userList,
                 userMap = listData.userMap,
+                outdatedCount = listData.outdatedCount,
             )
         }
 
@@ -88,6 +89,7 @@ sealed interface ListTopBarUiState {
             val userIndex: Int,
             val userList: List<UserInfo>,
             val userMap: Map<Int, Long>,
+            val outdatedCount: Long = 0L, // 备份提醒角标：待更新应用数
         ) : Success(opType, selected, total, isUpdating)
 
         data class Files(

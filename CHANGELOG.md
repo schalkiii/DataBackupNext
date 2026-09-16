@@ -11,6 +11,10 @@
 * **backup:** Configurable multiple backup copies (log-rotation style retention, default 1 for backward compatibility)
 * **apps:** Restore view now supports "cloud has newer version" filter (cloud backup version newer than installed)
 * **apps:** App details show the counterpart version — latest backup version on backup view, installed local version on restore view
+* **apps:** Backup reminder badge on the list subtitle — shows the count of apps whose local version is newer than the backup (backup view only)
+* **apps:** History copies browsing and point-in-time restore — app details list all copies of the same package with backup time, selecting a copy activates it for restore
+* **apps:** List filter conditions are persisted per operation type and restored on next visit
+* **apps:** Inline version transition badge next to the update icon, e.g. `1.0 → 1.2` (backup view: local → backup, restore view: cloud → local)
 
 
 ### Bug Fixes
@@ -23,6 +27,7 @@
 
 * Add unit tests for backup status aggregation, cloud index manifest serialization and package predicates (20 cases)
 * Add unit tests for backup index baseline aggregation on backup/restore scenarios (4 cases)
+* Add unit tests for version transition formatting and copy selection (5 cases: 4 for version transitions, 1 for same-key copy filtering and ordering)
 
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)
 

@@ -415,6 +415,10 @@
     <string name="backup_retain_copies">Backup copies to retain</string>
     <string name="backup_retain_copies_desc">Keep multiple copies per app, oldest ones beyond the limit will be rotated out</string>
     <string name="args_current_copies">Current: %1$d copies</string>
+    <string name="format_x_apps_have_updates">%1$d apps have updates</string>
+    <string name="history_copies">History copies</string>
+    <string name="current_copy">%1$s (Current)</string>
+    <string name="copy_selected_for_restore">Selected this copy for restore</string>
     <string name="last_update">Last update</string>
     <string name="welcome_screen_app_desc">Enjoy hassle-free backups with DataBackup. It’s simple to use and completely FOSS. Keep your data safe without the stress</string>
     <string name="get_started">Get started</string>

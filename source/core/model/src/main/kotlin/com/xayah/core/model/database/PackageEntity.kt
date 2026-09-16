@@ -278,7 +278,17 @@ data class PackageEntity(
 data class BackupIndex(
     val lastBackupTime: Long,
     val backedUpVersionCode: Long,
+    // 对侧版本名：备份页为备份版本名，恢复页基线为本机已安装版本名
+    val backedUpVersionName: String,
     val copyCount: Int,
+)
+
+/**
+ * 版本信息载体：供版本基线 Map 使用（恢复页=本机已安装版本，备份页=台账备份版本）。
+ */
+data class VersionInfo(
+    val versionCode: Long,
+    val versionName: String,
 )
 
 fun PackageEntity.asExternalModel() = App(
@@ -304,6 +314,8 @@ fun PackageEntity.toAppWithStatus(index: BackupIndex?): App = App(
     backedUpVersionCode = index?.backedUpVersionCode ?: 0L,
     copyCount = index?.copyCount ?: 0,
     isOutdated = index != null && packageInfo.versionCode > index.backedUpVersionCode,
+    versionName = packageInfo.versionName,
+    backedUpVersionName = index?.backedUpVersionName ?: "",
 )
 
 // Part update entity

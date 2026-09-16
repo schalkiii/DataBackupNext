@@ -44,6 +44,7 @@ import com.xayah.core.model.database.PackageIndexInfo
 import com.xayah.core.model.database.PackageInfo
 import com.xayah.core.model.database.PackageStorageStats
 import com.xayah.core.model.database.PackageUpdateEntity
+import com.xayah.core.model.database.VersionInfo
 import com.xayah.core.model.database.toAppWithStatus
 import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.parcelables.PathParcelable
@@ -81,20 +82,22 @@ class AppsRepo @Inject constructor(
     private val pathUtil: PathUtil,
     private val cloudRepo: CloudRepository
 ) {
-    fun getBackups(filters: Flow<Filters>): Flow<Map<String, Long>> = combine(
+    fun getBackups(filters: Flow<Filters>): Flow<Map<String, VersionInfo>> = combine(
         filters,
         appsDao.queryPackagesFlow(opType = OpType.RESTORE).flowOn(defaultDispatcher),
     ) { f, p ->
-        // pkgUserKey -> 备份版本码，供备份页"本机有更新"比较
-        p.filter { it.indexInfo.cloud == f.cloud && it.indexInfo.backupDir == f.backupDir }.associate { it.pkgUserKey to it.packageInfo.versionCode }
+        // pkgUserKey -> 最近一次备份版本信息，供备份页"本机有更新"比较与徽标展示
+        p.filter { it.indexInfo.cloud == f.cloud && it.indexInfo.backupDir == f.backupDir }
+            .groupBy { it.pkgUserKey }
+            .mapValues { (_, group) -> group.maxByOrNull { it.extraInfo.lastBackupTime }?.let { VersionInfo(it.packageInfo.versionCode, it.packageInfo.versionName) } ?: VersionInfo(0L, "") }
     }
 
-    fun getInstalledVersions(users: Flow<List<UserInfo>>): Flow<Map<String, Long>> = users.map { u ->
-        // pkgUserKey -> 本机已安装版本码，供恢复页"云端有更新"比较
-        val map = mutableMapOf<String, Long>()
+    fun getInstalledVersions(users: Flow<List<UserInfo>>): Flow<Map<String, VersionInfo>> = users.map { u ->
+        // pkgUserKey -> 本机已安装版本信息，供恢复页"云端有更新"比较与徽标展示
+        val map = mutableMapOf<String, VersionInfo>()
         u.forEach {
             rootService.getInstalledPackagesAsUser(0, it.id).forEach { info ->
-                map["${info.packageName}-${it.id}"] = info.versionCode.toLong()
+                map["${info.packageName}-${it.id}"] = VersionInfo(info.versionCode.toLong(), info.versionName ?: "")
             }
         }
         map
@@ -121,7 +124,7 @@ class AppsRepo @Inject constructor(
     fun getApps(
         opType: OpType,
         listData: Flow<ListData>,
-        pkgUserVersions: Flow<Map<String, Long>>,
+        pkgUserVersions: Flow<Map<String, VersionInfo>>,
         refs: Flow<List<LabelAppCrossRefEntity>>,
         labels: Flow<Set<String>>,
         cloudName: String,
@@ -166,13 +169,45 @@ class AppsRepo @Inject constructor(
      * 取最近一次备份的时间与副本数；版本基线默认取台账备份版本，
      * 传入 baselineVersions 时改用其版本（恢复页=本机已安装版本）。
      */
-    fun getBackupIndexes(copies: List<PackageEntity>, baselineVersions: Map<String, Long>? = null): Map<String, BackupIndex> = copies.groupBy { it.pkgUserKey }.mapValues { (_, group) ->
+    fun getBackupIndexes(copies: List<PackageEntity>, baselineVersions: Map<String, VersionInfo>? = null): Map<String, BackupIndex> = copies.groupBy { it.pkgUserKey }.mapValues { (_, group) ->
         val latest = group.maxByOrNull { it.extraInfo.lastBackupTime } ?: group.first()
+        // 恢复页基线缺失（本机未安装）时退化为 0 版本，而非回退台账备份版本
+        val baseline = if (baselineVersions != null) baselineVersions[latest.pkgUserKey] ?: VersionInfo(0L, "") else null
         BackupIndex(
             lastBackupTime = latest.extraInfo.lastBackupTime,
-            backedUpVersionCode = if (baselineVersions != null) baselineVersions[latest.pkgUserKey] ?: 0L else latest.packageInfo.versionCode,
+            backedUpVersionCode = baseline?.versionCode ?: latest.packageInfo.versionCode,
+            backedUpVersionName = baseline?.versionName ?: latest.packageInfo.versionName,
             copyCount = group.size,
         )
+    }
+
+    /**
+     * 备份提醒角标：全量已安装应用中"本机版本高于最近备份版本"的数量，
+     * 与列表页 outdatedSet 同口径（blocked=false，不受筛选/搜索影响）。
+     */
+    fun countOutdatedBackupApps(cloudName: String, backupDir: String): Flow<Long> = combine(
+        appsDao.queryPackagesFlow(opType = OpType.BACKUP, blocked = false),
+        appsDao.queryPackagesFlow(opType = OpType.RESTORE, cloud = cloudName, backupDir = backupDir),
+    ) { installed, backups ->
+        val indexMap = getBackupIndexes(backups)
+        installed.count { p -> indexMap[p.pkgUserKey]?.let { p.packageInfo.versionCode > it.backedUpVersionCode } == true }.toLong()
+    }.flowOn(defaultDispatcher)
+
+    /**
+     * 详情页历史副本：同 pkgUserKey、同云端作用域的全部 RESTORE 实体，按备份时间倒序。
+     */
+    fun getAppCopies(id: Long): Flow<List<PackageEntity>> = getApp(id).map { app ->
+        if (app == null) emptyList()
+        else appsDao.queryPackages(OpType.RESTORE, app.indexInfo.cloud, app.indexInfo.backupDir).selectCopiesOf(app)
+    }.flowOn(defaultDispatcher)
+
+    /**
+     * 定点恢复：清空同组副本的选择后激活目标副本，避免多副本同时进入恢复队列。
+     */
+    suspend fun restoreFromCopy(app: PackageEntity, copyId: Long) {
+        val copies = appsDao.queryPackages(OpType.RESTORE, app.indexInfo.cloud, app.indexInfo.backupDir).selectCopiesOf(app)
+        appsDao.activateByIds(copies.map { it.id }, false)
+        appsDao.activateById(copyId, true)
     }
 
     fun countApps(opType: OpType) = appsDao.countPackagesFlow(opType = opType, blocked = false)
@@ -826,3 +861,10 @@ class AppsRepo @Inject constructor(
         }
     }.withLog()
 }
+
+/**
+ * 副本筛选纯函数：从同作用域 RESTORE 实体中选出同包名同用户的全部副本，按备份时间倒序。
+ * 独立成顶层函数便于单元测试。
+ */
+fun List<PackageEntity>.selectCopiesOf(app: PackageEntity): List<PackageEntity> =
+    filter { it.packageName == app.packageName && it.userId == app.userId }.sortedByDescending { it.extraInfo.lastBackupTime }

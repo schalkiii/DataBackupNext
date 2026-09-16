@@ -18,6 +18,13 @@ val KeyLoadSystemApps = booleanPreferencesKey("load_system_apps")
 val KeyBackupConfigs = booleanPreferencesKey("backup_configs")
 val KeyRestorePermissions = booleanPreferencesKey("restore_permissions")
 val KeyRestoreSsaid = booleanPreferencesKey("restore_ssaid")
+// 列表筛选条件持久化（按操作类型分键，进入列表时恢复上次选择）
+val KeyFilterBackupHasBackups = booleanPreferencesKey("filter_backup_has_backups")
+val KeyFilterBackupHasNoBackups = booleanPreferencesKey("filter_backup_has_no_backups")
+val KeyFilterBackupUpdatedApps = booleanPreferencesKey("filter_backup_updated_apps")
+val KeyFilterRestoreInstalledApps = booleanPreferencesKey("filter_restore_installed_apps")
+val KeyFilterRestoreNotInstalledApps = booleanPreferencesKey("filter_restore_not_installed_apps")
+val KeyFilterRestoreUpdatedApps = booleanPreferencesKey("filter_restore_updated_apps")
 
 // -----------------------------------------Read-----------------------------------------
 fun Context.readMonet() = readStoreBoolean(key = KeyMonet, defValue = true)
@@ -34,6 +41,12 @@ fun Context.readAutoScreenOff() = readStoreBoolean(key = KeyAutoScreenOff, defVa
 fun Context.readBackupConfigs() = readStoreBoolean(key = KeyBackupConfigs, defValue = true)
 fun Context.readRestorePermissions() = readStoreBoolean(key = KeyRestorePermissions, defValue = true)
 fun Context.readRestoreSsaid() = readStoreBoolean(key = KeyRestoreSsaid, defValue = true)
+fun Context.readFilterBackupHasBackups() = readStoreBoolean(key = KeyFilterBackupHasBackups, defValue = true)
+fun Context.readFilterBackupHasNoBackups() = readStoreBoolean(key = KeyFilterBackupHasNoBackups, defValue = true)
+fun Context.readFilterBackupUpdatedApps() = readStoreBoolean(key = KeyFilterBackupUpdatedApps, defValue = false)
+fun Context.readFilterRestoreInstalledApps() = readStoreBoolean(key = KeyFilterRestoreInstalledApps, defValue = true)
+fun Context.readFilterRestoreNotInstalledApps() = readStoreBoolean(key = KeyFilterRestoreNotInstalledApps, defValue = true)
+fun Context.readFilterRestoreUpdatedApps() = readStoreBoolean(key = KeyFilterRestoreUpdatedApps, defValue = false)
 
 // -----------------------------------------Write-----------------------------------------
 suspend fun Context.saveMonet(value: Boolean) = saveStoreBoolean(key = KeyMonet, value = value)
@@ -50,3 +63,9 @@ suspend fun Context.saveAutoScreenOff(value: Boolean) = saveStoreBoolean(key = K
 suspend fun Context.saveBackupConfigs(value: Boolean) = saveStoreBoolean(key = KeyBackupConfigs, value = value)
 suspend fun Context.saveRestorePermissions(value: Boolean) = saveStoreBoolean(key = KeyRestorePermissions, value = value)
 suspend fun Context.saveRestoreSsaid(value: Boolean) = saveStoreBoolean(key = KeyRestoreSsaid, value = value)
+suspend fun Context.saveFilterBackupHasBackups(value: Boolean) = saveStoreBoolean(key = KeyFilterBackupHasBackups, value = value)
+suspend fun Context.saveFilterBackupHasNoBackups(value: Boolean) = saveStoreBoolean(key = KeyFilterBackupHasNoBackups, value = value)
+suspend fun Context.saveFilterBackupUpdatedApps(value: Boolean) = saveStoreBoolean(key = KeyFilterBackupUpdatedApps, value = value)
+suspend fun Context.saveFilterRestoreInstalledApps(value: Boolean) = saveStoreBoolean(key = KeyFilterRestoreInstalledApps, value = value)
+suspend fun Context.saveFilterRestoreNotInstalledApps(value: Boolean) = saveStoreBoolean(key = KeyFilterRestoreNotInstalledApps, value = value)
+suspend fun Context.saveFilterRestoreUpdatedApps(value: Boolean) = saveStoreBoolean(key = KeyFilterRestoreUpdatedApps, value = value)

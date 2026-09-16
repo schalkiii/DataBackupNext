@@ -404,6 +404,10 @@
     <string name="backup_retain_copies">备份副本保留数</string>
     <string name="backup_retain_copies_desc">为每个应用保留多份备份副本，超出保留数的最旧副本将被轮转清理</string>
     <string name="args_current_copies">当前：%1$d 份</string>
+    <string name="format_x_apps_have_updates">%1$d 个应用有更新</string>
+    <string name="history_copies">历史副本</string>
+    <string name="current_copy">%1$s（当前）</string>
+    <string name="copy_selected_for_restore">已选择此副本用于恢复</string>
     <string name="last_update">最近更新</string>
     <string name="welcome_screen_app_desc">享受无忧备份，使用简单，完全免费，轻松保护您的数据安全</string>
     <string name="get_started">立刻开始</string>

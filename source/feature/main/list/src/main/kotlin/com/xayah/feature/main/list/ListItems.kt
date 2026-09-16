@@ -40,10 +40,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xayah.core.model.OpType
 import com.xayah.core.model.Target
+import com.xayah.core.model.buildVersionTransition
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.ui.R
 import com.xayah.core.ui.component.BodyMediumText
 import com.xayah.core.ui.component.IconButton
+import com.xayah.core.ui.component.LabelSmallText
 import com.xayah.core.ui.component.PackageIconImage
 import com.xayah.core.ui.component.Surface
 import com.xayah.core.ui.component.TitleLargeText
@@ -95,6 +97,7 @@ fun LazyListScope.listItems(
                         label = item.label,
                         preserveId = item.preserveId,
                         isOutdated = item.isOutdated,
+                        versionTransition = buildVersionTransition(uiState.opType, item),
                         flag = item.selectionFlag,
                         selected = item.selected,
                         onClick = {
@@ -139,6 +142,7 @@ fun AppItem(
     label: String,
     preserveId: Long,
     isOutdated: Boolean,
+    versionTransition: String? = null,
     flag: Int,
     selected: Boolean,
     onChangeFlag: (Long, Int) -> Unit,
@@ -163,6 +167,14 @@ fun AppItem(
             Row(modifier = Modifier.height(IntrinsicSize.Min)) {
                 if (isOutdated) {
                     Icon(modifier = Modifier.fillMaxHeight(), imageVector = Icons.Outlined.Update, contentDescription = null)
+                }
+                // 行内版本差徽标：待更新时展示"本机版本 → 对侧版本"微缩文本
+                if (versionTransition != null) {
+                    LabelSmallText(
+                        text = versionTransition,
+                        color = ThemedColorSchemeKeyTokens.Primary.value,
+                        maxLines = 1,
+                    )
                 }
                 if (preserveId != 0L) {
                     Icon(modifier = Modifier.fillMaxHeight(), imageVector = Icons.Outlined.Shield, contentDescription = null)

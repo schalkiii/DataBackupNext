@@ -29,6 +29,9 @@
     <item name="version" type="string" />
     <item name="backup_version" type="string" />
     <item name="local_version" type="string" />
+    <item name="history_copies" type="string" />
+    <item name="current_copy" type="string" />
+    <item name="copy_selected_for_restore" type="string" />
     <item name="first_install" type="string" />
     <item name="granted" type="string" />
     <item name="denied" type="string" />

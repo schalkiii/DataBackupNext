@@ -74,6 +74,16 @@ internal fun ListTopBar(
             if (uiState.selected != 0L && uiState.total != 0L) {
                 subtitle = "(${uiState.selected}/${uiState.total})"
             }
+
+            // 备份提醒角标：仅备份页展示，提示"N 个应用有新版本待备份"
+            val outdatedText = if (uiState is ListTopBarUiState.Success.Apps && uiState.opType == OpType.BACKUP && uiState.outdatedCount > 0L) {
+                stringResource(id = R.string.format_x_apps_have_updates, uiState.outdatedCount)
+            } else {
+                null
+            }
+            if (outdatedText != null) {
+                subtitle = if (subtitle == null) outdatedText else "${subtitle} · $outdatedText"
+            }
         }
     }
 
