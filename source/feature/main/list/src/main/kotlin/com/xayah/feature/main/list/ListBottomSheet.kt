@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xayah.core.data.repository.Filters
+import com.xayah.core.datastore.DEFAULT_FILTER_BACKUP_LAST_BACKUP_DAYS
 import com.xayah.core.datastore.saveLoadSystemApps
 import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.OpType
@@ -48,6 +49,7 @@ import com.xayah.core.ui.component.RadioButtons
 import com.xayah.core.ui.component.Title
 import com.xayah.core.ui.component.TitleSort
 import com.xayah.core.ui.component.paddingHorizontal
+import com.xayah.core.ui.component.paddingVertical
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.util.localBackupSaveDir
 import com.xayah.core.work.WorkManagerInitializer
@@ -199,6 +201,42 @@ private fun SourceChips(clouds: List<CloudEntity>, onChanged: (cloud: String, ba
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LastBackupDaysFilter(current: Int, onChanged: (Int) -> Unit) {
+    val presets = listOf(
+        0 to stringResource(id = R.string.last_backup_days_off),
+        7 to stringResource(id = R.string.last_backup_days_7),
+        30 to stringResource(id = R.string.last_backup_days_30),
+        90 to stringResource(id = R.string.last_backup_days_90),
+    )
+    // 开关控制启停：关闭时隐藏天数预设，开启时默认使用 30 天阈值
+    CheckBox(
+        checked = current > 0,
+        text = stringResource(id = R.string.last_backup_days_filter),
+        onValueChange = {
+            onChanged(if (current > 0) 0 else DEFAULT_FILTER_BACKUP_LAST_BACKUP_DAYS)
+        }
+    )
+    if (current > 0) {
+        Row(
+            modifier = Modifier
+                .paddingHorizontal(SizeTokens.Level24)
+                .paddingVertical(SizeTokens.Level4)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(SizeTokens.Level8),
+        ) {
+            presets.forEach { (days, label) ->
+                FilterChip(
+                    onClick = { onChanged(days) },
+                    label = { Text(label) },
+                    selected = current == days,
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LabelsFlow(labelEntities: List<LabelEntity>, labels: Set<String>, onClick: (String) -> Unit) {
@@ -275,6 +313,10 @@ internal fun AppsFilterSheet(
                     CheckBox(checked = filters.hasBackups, text = stringResource(R.string.apps_which_have_backups), onValueChange = { setFilters(filters.copy(hasBackups = filters.hasBackups.not())) })
                     CheckBox(checked = filters.hasNoBackups, text = stringResource(R.string.apps_which_have_no_backups), onValueChange = { setFilters(filters.copy(hasNoBackups = filters.hasNoBackups.not())) })
                     CheckBox(checked = filters.updatedApps, text = stringResource(R.string.apps_with_new_local_versions), onValueChange = { setFilters(filters.copy(updatedApps = filters.updatedApps.not())) })
+                    // 『上次备份超过 X 天』：0 = 关闭
+                    LastBackupDaysFilter(current = filters.lastBackupDays) { days ->
+                        setFilters(filters.copy(lastBackupDays = days))
+                    }
                 }
 
                 OpType.RESTORE -> {

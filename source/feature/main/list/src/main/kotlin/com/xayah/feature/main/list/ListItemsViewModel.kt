@@ -21,6 +21,8 @@ import com.xayah.feature.main.list.ListItemsUiState.Success
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -35,20 +37,25 @@ class ListItemsViewModel @Inject constructor(
     private val target: Target = Target.valueOf(savedStateHandle.get<String>(MainRoutes.ARG_TARGET)!!.decodeURL().trim())
     private val opType: OpType = OpType.of(savedStateHandle.get<String>(MainRoutes.ARG_OP_TYPE)?.decodeURL()?.trim())
 
-    val uiState: StateFlow<ListItemsUiState> = when (target) {
-        Target.Apps -> listDataRepo.getAppList().map {
-            Success.Apps(
-                opType = opType,
-                appList = it,
-            )
-        }
+    val uiState: StateFlow<ListItemsUiState> = listDataRepo.scope.flatMapLatest { scope ->
+        if (scope == null) {
+            flowOf(Loading)
+        } else {
+            when (scope.target) {
+                Target.Apps -> listDataRepo.getAppList().map {
+                    Success.Apps(
+                        opType = scope.opType,
+                        appList = it,
+                    )
+                }
 
-
-        Target.Files -> listDataRepo.getFileList().map {
-            Success.Files(
-                opType = opType,
-                fileList = it,
-            )
+                Target.Files -> listDataRepo.getFileList().map {
+                    Success.Files(
+                        opType = scope.opType,
+                        fileList = it,
+                    )
+                }
+            }
         }
     }.stateIn(
         scope = viewModelScope,

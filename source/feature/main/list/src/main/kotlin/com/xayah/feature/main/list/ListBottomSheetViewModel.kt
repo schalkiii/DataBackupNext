@@ -44,14 +44,15 @@ class ListBottomSheetViewModel @Inject constructor(
 
     val uiState: StateFlow<ListBottomSheetUiState> = when (target) {
         Target.Apps -> combine(
+            listDataRepo.scope,
             listDataRepo.getListData(),
             listDataRepo.getAppList(),
             labelsRepo.getLabelsFlow(),
             cloudRepo.clouds,
-        ) { lData, aList, labels, clouds ->
+        ) { scope, lData, aList, labels, clouds ->
             val listData = lData.castTo<ListData.Apps>()
             Success.Apps(
-                opType = opType,
+                opType = scope?.opType ?: opType,
                 showFilterSheet = listData.showFilterSheet,
                 sortIndex = listData.sortIndex,
                 sortType = listData.sortType,
@@ -65,13 +66,14 @@ class ListBottomSheetViewModel @Inject constructor(
         }
 
         Target.Files -> combine(
+            listDataRepo.scope,
             listDataRepo.getListData(),
             listDataRepo.getFileList(),
             labelsRepo.getLabelsFlow()
-        ) { lData, fList, labels ->
+        ) { scope, lData, fList, labels ->
             val listData = lData.castTo<ListData.Files>()
             Success.Files(
-                opType = opType,
+                opType = scope?.opType ?: opType,
                 showFilterSheet = listData.showFilterSheet,
                 sortIndex = listData.sortIndex,
                 sortType = listData.sortType,

@@ -15,6 +15,10 @@
 * **apps:** History copies browsing and point-in-time restore — app details list all copies of the same package with backup time, selecting a copy activates it for restore
 * **apps:** List filter conditions are persisted per operation type and restored on next visit
 * **apps:** Inline version transition badge next to the update icon, e.g. `1.0 → 1.2` (backup view: local → backup, restore view: cloud → local)
+* **apps:** Unify backup and restore pages into a single list with a backup/restore segmented switch at the top — filter once, then act on the current selection
+* **apps:** Batch operations now include delete backup and uninstall (root) for the selected apps on the unified page
+* **apps:** New filter "last backup older than N days" (default 30, adjustable, persisted) to surface apps whose backup is stale
+* **apps:** App details on the backup view now show the last backup time taken from the latest backup archive
 
 
 ### Bug Fixes
@@ -28,6 +32,7 @@
 * Add unit tests for backup status aggregation, cloud index manifest serialization and package predicates (20 cases)
 * Add unit tests for backup index baseline aggregation on backup/restore scenarios (4 cases)
 * Add unit tests for version transition formatting and copy selection (5 cases: 4 for version transitions, 1 for same-key copy filtering and ordering)
+* Add unit tests for the "last backup older than N days" predicate (5 cases covering disabled value, never-backed-up, missing index and day-threshold boundary)
 
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)
 

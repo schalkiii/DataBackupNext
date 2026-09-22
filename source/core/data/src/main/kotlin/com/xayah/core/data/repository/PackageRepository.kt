@@ -11,6 +11,7 @@ import com.xayah.core.model.DataState
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OpType
 import com.xayah.core.model.SortType
+import com.xayah.core.model.database.BackupIndex
 import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.database.MediaExtraInfo
 import com.xayah.core.model.database.MediaIndexInfo
@@ -47,6 +48,7 @@ class PackageRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "PackageRepository"
+        private const val DAY_TO_MILLIS = 24L * 60 * 60 * 1000
     }
 
     private fun log(onMsg: () -> String): String = run {
@@ -99,6 +101,15 @@ class PackageRepository @Inject constructor(
     // 筛选"有更新"：勾选时仅保留待更新集合（备份页=本机版本更高，恢复页=云端版本更高）
     fun getUpdatedPredicate(value: Boolean, outdatedSet: Set<String>): (PackageEntity) -> Boolean = { p ->
         value.not() || p.pkgUserKey in outdatedSet
+    }
+
+    // 筛选"上次备份超过 X 天"：days<=0 关闭；未备份（lastBackupTime=0）视为超期以纳入管理
+    fun getLastBackupOlderThanPredicate(value: Int, indexMap: Map<String, BackupIndex>): (PackageEntity) -> Boolean = { p ->
+        if (value <= 0) true
+        else {
+            val lastBackupTime = indexMap[p.pkgUserKey]?.lastBackupTime ?: 0L
+            lastBackupTime == 0L || (System.currentTimeMillis() - lastBackupTime) > value * DAY_TO_MILLIS
+        }
     }
 
     private fun sortByInstallTimeNew(type: SortType): Comparator<PackageEntity> = when (type) {

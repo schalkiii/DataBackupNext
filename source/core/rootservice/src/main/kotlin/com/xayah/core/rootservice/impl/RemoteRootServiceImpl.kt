@@ -25,6 +25,7 @@ import android.os.UserManagerHidden
 import android.view.SurfaceControlHidden
 import androidx.core.content.pm.PermissionInfoCompat
 import com.android.server.display.DisplayControl
+import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ShellUtils
 import com.xayah.core.datastore.ConstantUtil.DEFAULT_IDLE_TIMEOUT
 import com.xayah.core.hiddenapi.castTo
@@ -472,6 +473,13 @@ internal class RemoteRootServiceImpl(private val context: Context) : IRemoteRoot
 
     override fun forceStopPackageAsUser(packageName: String, userId: Int) = synchronized(lock) {
         activityManager.forceStopPackageAsUser(packageName, userId)
+    }
+
+    override fun uninstallPackageAsUser(packageName: String, userId: Int): Boolean = synchronized(lock) {
+        runCatching {
+            // 通过 pm 卸载指定用户的应用；root 提升权限由根服务进程承担，以命令退出码判定成败
+            Shell.cmd("pm uninstall --user $userId $packageName").exec().isSuccess
+        }.getOrElse { false }
     }
 
     override fun setApplicationEnabledSetting(packageName: String, newState: Int, flags: Int, userId: Int, callingPackage: String?) = synchronized(lock) {

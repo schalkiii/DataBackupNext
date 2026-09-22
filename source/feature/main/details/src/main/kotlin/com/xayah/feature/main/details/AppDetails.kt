@@ -506,11 +506,13 @@ private fun Info(app: PackageEntity, counterpart: PackageEntity?) {
                 value = DateUtil.formatTimestamp(app.packageInfo.lastUpdateTime, DateUtil.PATTERN_YMD_HMS),
             )
         }
-        if (app.extraInfo.lastBackupTime != 0L) {
+        // 上次备份时间：备份页对侧为最新备份归档，其台账时间方为真实"上次备份"；恢复页直接用归档实体时间
+        val lastBackupTime = if (app.indexInfo.opType == OpType.BACKUP) counterpart?.extraInfo?.lastBackupTime ?: 0L else app.extraInfo.lastBackupTime
+        if (lastBackupTime != 0L) {
             Clickable(
                 icon = ImageVector.vectorResource(id = R.drawable.ic_rounded_acute),
                 title = stringResource(id = R.string.last_backup),
-                value = DateUtil.formatTimestamp(app.extraInfo.lastBackupTime, DateUtil.PATTERN_YMD_HMS),
+                value = DateUtil.formatTimestamp(lastBackupTime, DateUtil.PATTERN_YMD_HMS),
             )
         }
         if (app.extraInfo.ssaid.isNotEmpty()) {

@@ -43,12 +43,13 @@ class ListActionsViewModel @Inject constructor(
 
     val uiState: StateFlow<ListActionsUiState> = when (target) {
         Target.Apps -> combine(
+            listDataRepo.scope,
             listDataRepo.getListData(),
             listDataRepo.getAppList()
-        ) { lData, aList ->
+        ) { scope, lData, aList ->
             val listData = lData.castTo<ListData.Apps>()
             Success.Apps(
-                opType = opType,
+                opType = scope?.opType ?: opType,
                 selected = listData.selected,
                 isUpdating = listData.isUpdating,
                 appList = aList,
@@ -56,12 +57,13 @@ class ListActionsViewModel @Inject constructor(
         }
 
         Target.Files -> combine(
+            listDataRepo.scope,
             listDataRepo.getListData(),
             listDataRepo.getFileList()
-        ) { lData, fList ->
+        ) { scope, lData, fList ->
             val listData = lData.castTo<ListData.Files>()
             Success.Files(
-                opType = opType,
+                opType = scope?.opType ?: opType,
                 selected = listData.selected,
                 isUpdating = listData.isUpdating,
                 fileList = fList,
@@ -217,6 +219,39 @@ class ListActionsViewModel @Inject constructor(
                 else -> {}
             }
 
+        }
+    }
+
+    /**
+     * 批量删除已选应用的备份归档（删除备份）。
+     * 经当前模式的实体类型（本机已装 / 备份归档）自动映射，见 [AppsRepo.deleteBackupSelected]。
+     */
+    fun deleteBackupSelected() {
+        viewModelScope.launchOnDefault {
+            when (uiState.value) {
+                is Success.Apps -> {
+                    val state = uiState.value.castTo<Success.Apps>()
+                    appsRepo.deleteBackupSelected(state.appList.filter { it.selected }.map { it.id }, state.opType)
+                }
+
+                else -> {}
+            }
+        }
+    }
+
+    /**
+     * 批量卸载已选非系统应用（Root 卸载）。系统应用与卸载失败项自动跳过。
+     */
+    fun uninstallSelected() {
+        viewModelScope.launchOnDefault {
+            when (uiState.value) {
+                is Success.Apps -> {
+                    val state = uiState.value.castTo<Success.Apps>()
+                    appsRepo.uninstallNonSystemApps(state.appList.filter { it.selected }.map { it.id })
+                }
+
+                else -> {}
+            }
         }
     }
 

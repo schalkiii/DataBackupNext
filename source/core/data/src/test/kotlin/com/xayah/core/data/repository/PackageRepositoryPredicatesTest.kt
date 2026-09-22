@@ -5,6 +5,7 @@ import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.model.CompressionType
 import com.xayah.core.model.OpType
 import com.xayah.core.model.SortType
+import com.xayah.core.model.database.BackupIndex
 import com.xayah.core.model.database.PackageDataStates
 import com.xayah.core.model.database.PackageDataStats
 import com.xayah.core.model.database.PackageEntity
@@ -125,5 +126,49 @@ class PackageRepositoryPredicatesTest {
         val comparator = repository.getSortComparatorNew(sortIndex = 3, sortType = SortType.DESCENDING)
 
         assertTrue(comparator.compare(early, late) > 0)
+    }
+
+    private fun backupIndex(lastBackupTime: Long) = BackupIndex(
+        lastBackupTime = lastBackupTime,
+        backedUpVersionCode = 10L,
+        backedUpVersionName = "1.0",
+        copyCount = 1,
+    )
+
+    @Test
+    fun `lastBackupDays谓词值小于等于0时全部通过`() {
+        val predicate = repository.getLastBackupOlderThanPredicate(value = 0, indexMap = mapOf("com.example.app-0" to backupIndex(100L)))
+
+        assertTrue(predicate(buildEntity()))
+    }
+
+    @Test
+    fun `lastBackupDays谓词未备份时视为超期以纳入管理`() {
+        val predicate = repository.getLastBackupOlderThanPredicate(value = 30, indexMap = mapOf("com.example.app-0" to backupIndex(0L)))
+
+        assertTrue(predicate(buildEntity()))
+    }
+
+    @Test
+    fun `lastBackupDays谓词无索引条目时视为未备份纳入管理`() {
+        val predicate = repository.getLastBackupOlderThanPredicate(value = 30, indexMap = mapOf())
+
+        assertTrue(predicate(buildEntity()))
+    }
+
+    @Test
+    fun `lastBackupDays谓词备份超过阈值天数时通过`() {
+        val old = System.currentTimeMillis() - 31 * 24 * 60 * 60 * 1000L
+        val predicate = repository.getLastBackupOlderThanPredicate(value = 30, indexMap = mapOf("com.example.app-0" to backupIndex(old)))
+
+        assertTrue(predicate(buildEntity()))
+    }
+
+    @Test
+    fun `lastBackupDays谓词备份未超过阈值天数时不通过`() {
+        val recent = System.currentTimeMillis() - 1 * 24 * 60 * 60 * 1000L
+        val predicate = repository.getLastBackupOlderThanPredicate(value = 30, indexMap = mapOf("com.example.app-0" to backupIndex(recent)))
+
+        assertFalse(predicate(buildEntity()))
     }
 }

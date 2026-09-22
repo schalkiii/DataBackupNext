@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.CheckBox
 import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -159,7 +160,8 @@ private fun ListAction(target: Target, opType: OpType, selected: Long, viewModel
                                 checkListExpanded = { checkListExpanded = false },
                                 onBlockSelected = viewModel::blockSelected,
                                 onSelectDataItems = viewModel::showDataItemsSheet,
-                                onDeleteSelected = viewModel::deleteSelected,
+                                onDeleteBackupSelected = viewModel::deleteBackupSelected,
+                                onUninstallSelected = viewModel::uninstallSelected,
                             )
                         }
 
@@ -185,7 +187,8 @@ private fun AppsListActions(
     checkListExpanded: () -> Unit,
     onBlockSelected: () -> Unit,
     onSelectDataItems: () -> Unit,
-    onDeleteSelected: () -> Unit,
+    onDeleteBackupSelected: () -> Unit,
+    onUninstallSelected: () -> Unit,
 ) {
     val context = LocalContext.current
     val dialogState = LocalSlotScope.current!!.dialogSlot
@@ -201,26 +204,32 @@ private fun AppsListActions(
                     onBlockSelected()
                 }
             }
-            DetailedDataItem(enabled) {
-                checkListExpanded()
-                onSelectDataItems()
-            }
         }
 
         OpType.RESTORE -> {
-            DeleteItem(enabled) {
-                checkListExpanded()
-                dialogState.confirm(
-                    title = context.getString(R.string.prompt),
-                    text = context.getString(R.string.confirm_delete)
-                ) {
-                    onDeleteSelected()
-                }
-            }
-            DetailedDataItem(enabled) {
-                checkListExpanded()
-                onSelectDataItems()
-            }
+        }
+    }
+    DetailedDataItem(enabled) {
+        checkListExpanded()
+        onSelectDataItems()
+    }
+    // 统一页批量操作：删除备份与卸载应用在所有模式下均提供
+    DeleteBackupItem(enabled) {
+        checkListExpanded()
+        dialogState.confirm(
+            title = context.getString(R.string.delete_backup),
+            text = context.getString(R.string.confirm_delete_backup)
+        ) {
+            onDeleteBackupSelected()
+        }
+    }
+    UninstallItem(enabled) {
+        checkListExpanded()
+        dialogState.confirm(
+            title = context.getString(R.string.uninstall_app),
+            text = context.getString(R.string.confirm_uninstall_app)
+        ) {
+            onUninstallSelected()
         }
     }
 }
@@ -334,6 +343,26 @@ private fun DeleteItem(enabled: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
         text = stringResource(id = R.string.delete),
         leadingIcon = Icons.Rounded.Delete,
+        onClick = onClick,
+        enabled = enabled,
+    )
+}
+
+@Composable
+private fun DeleteBackupItem(enabled: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = stringResource(id = R.string.delete_backup),
+        leadingIcon = Icons.Rounded.RestartAlt,
+        onClick = onClick,
+        enabled = enabled,
+    )
+}
+
+@Composable
+private fun UninstallItem(enabled: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = stringResource(id = R.string.uninstall_app),
+        leadingIcon = Icons.Rounded.DeleteForever,
         onClick = onClick,
         enabled = enabled,
     )

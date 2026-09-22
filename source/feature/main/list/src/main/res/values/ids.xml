@@ -35,6 +35,18 @@
     <item name="apps_with_new_cloud_versions" type="string" />
     <item name="format_x_apps_have_updates" type="string" />
 
+    <item name="backup" type="string" />
+    <item name="restore" type="string" />
+    <item name="delete_backup" type="string" />
+    <item name="confirm_delete_backup" type="string" />
+    <item name="uninstall_app" type="string" />
+    <item name="confirm_uninstall_app" type="string" />
+    <item name="last_backup_days_filter" type="string" />
+    <item name="last_backup_days_off" type="string" />
+    <item name="last_backup_days_7" type="string" />
+    <item name="last_backup_days_30" type="string" />
+    <item name="last_backup_days_90" type="string" />
+
     <item name="backup_sort_type_items_apps" type="array" />
     <item name="backup_sort_type_items_files" type="array" />
 </resources>

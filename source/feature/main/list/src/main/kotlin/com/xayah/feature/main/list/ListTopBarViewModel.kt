@@ -18,6 +18,8 @@ import com.xayah.feature.main.list.ListTopBarUiState.Success
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -29,36 +31,59 @@ class ListTopBarViewModel @Inject constructor(
 ) : ViewModel() {
     private val target: Target = Target.valueOf(savedStateHandle.get<String>(MainRoutes.ARG_TARGET)!!.decodeURL().trim())
     private val opType: OpType = OpType.of(savedStateHandle.get<String>(MainRoutes.ARG_OP_TYPE)?.decodeURL()?.trim())
+    private val cloudName: String = savedStateHandle.get<String>(MainRoutes.ARG_ACCOUNT_NAME)?.decodeURL()?.trim() ?: ""
+    private val backupDir: String = savedStateHandle.get<String>(MainRoutes.ARG_ACCOUNT_REMOTE)?.decodeURL()?.trim() ?: ""
 
-    val uiState: StateFlow<ListTopBarUiState> = when (target) {
-        Target.Apps -> listDataRepo.getListData().map {
-            val listData = it.castTo<ListData.Apps>()
-            Success.Apps(
-                opType = opType,
-                selected = listData.selected,
-                total = listData.total,
-                isUpdating = listData.isUpdating,
-                userIndex = listData.userIndex,
-                userList = listData.userList,
-                userMap = listData.userMap,
-                outdatedCount = listData.outdatedCount,
-            )
-        }
+    val uiState: StateFlow<ListTopBarUiState> = listDataRepo.scope.flatMapLatest { scope ->
+        if (scope == null) {
+            flowOf(Loading)
+        } else {
+            when (scope.target) {
+                Target.Apps -> listDataRepo.getListData().map {
+                    val listData = it.castTo<ListData.Apps>()
+                    Success.Apps(
+                        opType = scope.opType,
+                        selected = listData.selected,
+                        total = listData.total,
+                        isUpdating = listData.isUpdating,
+                        userIndex = listData.userIndex,
+                        userList = listData.userList,
+                        userMap = listData.userMap,
+                        outdatedCount = listData.outdatedCount,
+                        cloudName = scope.cloudName,
+                        backupDir = scope.backupDir,
+                    )
+                }
 
-        Target.Files -> listDataRepo.getListData().map {
-            val listData = it.castTo<ListData.Files>()
-            Success.Files(
-                opType = opType,
-                selected = listData.selected,
-                total = listData.total,
-                isUpdating = listData.isUpdating,
-            )
+                Target.Files -> listDataRepo.getListData().map {
+                    val listData = it.castTo<ListData.Files>()
+                    Success.Files(
+                        opType = scope.opType,
+                        selected = listData.selected,
+                        total = listData.total,
+                        isUpdating = listData.isUpdating,
+                    )
+                }
+            }
         }
     }.stateIn(
         scope = viewModelScope,
         initialValue = Loading,
         started = SharingStarted.WhileSubscribed(5_000),
     )
+
+    /**
+     * 统一页模式切换：备份 ↔ 恢复（仅 Apps 目标有效）。
+     * 通过重发布 ListDataRepo 作用域，令所有列表 ViewModel 自动重建。
+     */
+    fun switchMode() {
+        viewModelScope.launchOnDefault {
+            val scope = listDataRepo.scope.value ?: return@launchOnDefault
+            if (scope.target != Target.Apps) return@launchOnDefault
+            val newOpType = if (scope.opType == OpType.BACKUP) OpType.RESTORE else OpType.BACKUP
+            listDataRepo.switchMode(scope.target, newOpType, scope.cloudName, scope.backupDir)
+        }
+    }
 
     fun search(text: String) {
         viewModelScope.launchOnDefault {
@@ -90,6 +115,8 @@ sealed interface ListTopBarUiState {
             val userList: List<UserInfo>,
             val userMap: Map<Int, Long>,
             val outdatedCount: Long = 0L, // 备份提醒角标：待更新应用数
+            val cloudName: String = "",
+            val backupDir: String = "",
         ) : Success(opType, selected, total, isUpdating)
 
         data class Files(

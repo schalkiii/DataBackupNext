@@ -1291,3 +1291,48 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 
 - ~~沙箱内无 GitHub 凭证，push 无法执行~~ 已解决（2026-09-16）：用户提供细粒度 PAT 后完成推送，远端 `main` 已更新至 9a300e71（token 仅在推送命令中内联使用，未持久化到任何配置或文件）；
 - 测试基线更新：core:data 13 用例（谓词 8 + 基线聚合 4 + 副本筛选 1）+ core:model 16 用例（状态 6 + 清单 5 + 版本差 4 + 1），共 29 例全绿。
+
+## 附录 G：第三轮增强实施 — 备份/恢复统一页（2026-09-22）
+
+### G.1 需求
+
+- 备份应用详情页也要显示应用的上次备份时间；
+- 将备份、恢复两个应用页面整合为统一页面，筛选后再选择「备份 / 恢复 / 删除备份 / 卸载应用」等操作；
+- 筛选增加「上次备份超过 X 天」条件（默认 30，可调，持久化）。
+
+### G.2 设计决策
+
+| 议题 | 决策 | 说明 |
+|---|---|---|
+| 统一页形态 | 单列表 + 顶部「备份/恢复」分段切换 | 复用同一列表与选择逻辑，作用域（Scope）驱动重建 |
+| 卸载实现 | 根服务 `pm uninstall --user` | `uninstallPackageAsUser`，仅非系统应用，批量卸载以退出码判定成败 |
+| 批量操作 | 在既有选择机制上扩充 | 删除备份按当前模式的实体类型自动映射（BACKUP 用包名↔备份台账，RESTORE 直接删实体） |
+| 默认天数 | 30 天（0 = 关闭该筛选，可持久化） | 未备份应用视为超期以纳入管理 |
+
+### G.3 关键落地
+
+- `ListDataRepo` 引入作用域 `ScopeState`（target/opType/cloud/backupDir），`switchMode()` 重发布作用域，各列表 VM 经 `flatMapLatest` 自动重建；
+- `ListTopBar` 新增 `SingleChoiceSegmentedButtonRow` 分段切换「备份 ↔ 恢复」；
+- 批量操作整合：`ListActions` 新增「删除备份」「卸载应用」（二次确认，卸载时跳过系统应用）；
+- 筛选：`Filters.lastBackupDays` + `PackageRepository.getLastBackupOlderThanPredicate`，经 DataStore 持久化（默认 30）；
+- 详情页：备份视图沿用对侧（counterpart 台账）的 `lastBackupTime` 展示「上次备份时间」，恢复视图直接用归档实体时间；
+- 字符串：新文案经 `feature/main/list/src/main/res/values/ids.xml` 以 `<item type="string"/>` 声明 ID，实际文案由 app 模块提供。
+
+### G.4 测试
+
+- `PackageRepositoryPredicatesTest` 新增 5 项 `getLastBackupOlderThanPredicate` 用例（关闭、未备份、无索引、超阈值、未超阈值），全绿（该文件共 13 例）；
+- `AppsRepoBackupIndexTest` 5 例全绿。
+
+### G.5 本轮改动文件
+
+根服务（AIDL/Impl/Wrapper 新增卸载）、`AppsRepo`/`ListDataRepo`/`PackageRepository`（统一页 + 过滤器）、`datastore/Int.kt`（天数持久化）、list 模块（TopBar 分段、Actions 批量操作、BottomSheet 筛选、各 VM flatMapLatest）、details 模块（上次备份时间）、`ids.xml`（字符串 ID 声明）、app `strings.xml`（文案）、单测。
+
+### G.6 构建环境备忘（关键踩坑，已固化）
+
+- **出站代理**：沙箱内部直连 `dl.google.com`/Maven 超时，需经本地代理 `127.0.0.1:18080`。构建时在 `gradle.properties` 临时注入 `systemProp.*proxy*`（提交前回退，避免代理信息入库）。
+- **内存上限**：cgroup 内存上限 4GB，`-Xmx4096m` 的 daemon + kotlin daemon + lint worker 并行会触发 OOM 被杀。已将 `org.gradle.jvmargs` 调至 `-Xmx2048m`、`kotlin.daemon.jvmargs=-Xmx1024m`、`workers.max=2`（构建后回退）。
+- 单测通过（core:data 13 + 5 新增谓词用例）、受影响模块 `compileDebugKotlin` 通过（仅弃用/opt-in 警告）。
+
+### G.7 交付与提示
+
+交付物见 `/workspace` 与 `apk/`；本附录记录了统一页的形态与裁决，便于后续直接复用方法论。

@@ -14,18 +14,22 @@ import com.xayah.core.util.module.combine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.xayah.core.datastore.readFilterBackupHasBackups
 import com.xayah.core.datastore.readFilterBackupHasNoBackups
+import com.xayah.core.datastore.readFilterBackupLastBackupDays
 import com.xayah.core.datastore.readFilterBackupUpdatedApps
 import com.xayah.core.datastore.readFilterRestoreInstalledApps
 import com.xayah.core.datastore.readFilterRestoreNotInstalledApps
 import com.xayah.core.datastore.readFilterRestoreUpdatedApps
 import com.xayah.core.datastore.saveFilterBackupHasBackups
 import com.xayah.core.datastore.saveFilterBackupHasNoBackups
+import com.xayah.core.datastore.saveFilterBackupLastBackupDays
 import com.xayah.core.datastore.saveFilterBackupUpdatedApps
 import com.xayah.core.datastore.saveFilterRestoreInstalledApps
 import com.xayah.core.datastore.saveFilterRestoreNotInstalledApps
 import com.xayah.core.datastore.saveFilterRestoreUpdatedApps
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -44,6 +48,10 @@ class ListDataRepo @Inject constructor(
     private val workRepo: WorkRepo,
 ) {
     private lateinit var listData: Flow<ListData>
+
+    // 统一页作用域状态：value 变化时，各列表 ViewModel 通过 flatMapLatest 流式重建（含备份↔恢复模式切换）
+    private val scopeState = MutableStateFlow<ScopeState?>(null)
+    val scope: StateFlow<ScopeState?> = scopeState.asStateFlow()
 
     private lateinit var selected: Flow<Long>
     private lateinit var total: Flow<Long>
@@ -104,6 +112,8 @@ class ListDataRepo @Inject constructor(
                             OpType.BACKUP -> runBlocking { context.readFilterBackupUpdatedApps().first() }
                             OpType.RESTORE -> runBlocking { context.readFilterRestoreUpdatedApps().first() }
                         },
+                        // 『上次备份超过 X 天』：0 = 关闭，默认 30，跨会话持久化
+                        lastBackupDays = runBlocking { context.readFilterBackupLastBackupDays().first() },
                     )
                 )
                 userIndex = MutableStateFlow(0)
@@ -148,6 +158,16 @@ class ListDataRepo @Inject constructor(
                 fileList = filesRepo.getFiles(opType = opType, listData = listData, refs = labelFileRefs, labels = labels, cloudName = cloudName, backupDir = backupDir)
             }
         }
+        // 作用域就绪后发布，令所有消费方进入流式订阅并可感知后续模式切换
+        scopeState.value = ScopeState(target, opType, cloudName, backupDir)
+    }
+
+    /**
+     * 统一页模式切换：备份 ↔ 恢复。复用 initialize 重建当前作用域的列表数据，
+     * 由于 scope 状态变化，所有消费方经 flatMapLatest 自动重建。
+     */
+    fun switchMode(target: Target, opType: OpType, cloudName: String, backupDir: String) {
+        initialize(target, opType, cloudName, backupDir)
     }
 
     private fun getAppListData(): Flow<ListData.Apps> = combine(
@@ -197,6 +217,7 @@ class ListDataRepo @Inject constructor(
                 context.saveFilterBackupHasBackups(current.hasBackups)
                 context.saveFilterBackupHasNoBackups(current.hasNoBackups)
                 context.saveFilterBackupUpdatedApps(current.updatedApps)
+                context.saveFilterBackupLastBackupDays(current.lastBackupDays)
             }
 
             OpType.RESTORE -> {
@@ -253,6 +274,19 @@ data class Filters(
     val installedApps: Boolean,
     val notInstalledApps: Boolean,
     val updatedApps: Boolean,
+    // 『上次备份超过 X 天』：0 = 关闭该筛选（默认 30）
+    val lastBackupDays: Int = 0,
+)
+
+/**
+ * 统一页作用域：目标、当前操作模式（备份/恢复）与云端作用域。
+ * type 由 initialize 发布，消费方依赖其变化触发流式重建。
+ */
+data class ScopeState(
+    val target: Target,
+    val opType: OpType,
+    val cloudName: String,
+    val backupDir: String,
 )
 
 sealed class ListData(

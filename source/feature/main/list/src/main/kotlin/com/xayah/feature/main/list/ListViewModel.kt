@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.xayah.core.data.repository.ListData
 import com.xayah.core.data.repository.ListDataRepo
+import com.xayah.core.data.repository.ScopeState
 import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.OpType
 import com.xayah.core.model.Target
@@ -24,6 +25,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -32,7 +35,7 @@ import javax.inject.Inject
 class ListViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
-    listDataRepo: ListDataRepo,
+    private val listDataRepo: ListDataRepo,
 ) : ViewModel() {
     private val target: Target = Target.valueOf(savedStateHandle.get<String>(MainRoutes.ARG_TARGET)!!.decodeURL().trim())
     private val opType: OpType = OpType.of(savedStateHandle.get<String>(MainRoutes.ARG_OP_TYPE)?.decodeURL()?.trim())
@@ -44,27 +47,33 @@ class ListViewModel @Inject constructor(
         listDataRepo.initialize(target, opType, cloudName, backupDir)
     }
 
-    val uiState: StateFlow<ListUiState> = when (target) {
-        Target.Apps -> listDataRepo.getListData().map {
-            val listData = it.castTo<ListData.Apps>()
-            Success.Apps(
-                opType = opType,
-                selected = listData.selected,
-                isUpdating = listData.isUpdating,
-                cloudName = cloudName,
-                backupDir = backupDir,
-            )
-        }
+    val uiState: StateFlow<ListUiState> = listDataRepo.scope.flatMapLatest { scope ->
+        if (scope == null) {
+            flowOf(Loading)
+        } else {
+            when (scope.target) {
+                Target.Apps -> listDataRepo.getListData().map {
+                    val listData = it.castTo<ListData.Apps>()
+                    Success.Apps(
+                        opType = scope.opType,
+                        selected = listData.selected,
+                        isUpdating = listData.isUpdating,
+                        cloudName = scope.cloudName,
+                        backupDir = scope.backupDir,
+                    )
+                }
 
-        Target.Files -> listDataRepo.getListData().map {
-            val listData = it.castTo<ListData.Files>()
-            Success.Files(
-                opType = opType,
-                selected = listData.selected,
-                isUpdating = listData.isUpdating,
-                cloudName = cloudName,
-                backupDir = backupDir,
-            )
+                Target.Files -> listDataRepo.getListData().map {
+                    val listData = it.castTo<ListData.Files>()
+                    Success.Files(
+                        opType = scope.opType,
+                        selected = listData.selected,
+                        isUpdating = listData.isUpdating,
+                        cloudName = scope.cloudName,
+                        backupDir = scope.backupDir,
+                    )
+                }
+            }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -72,11 +81,15 @@ class ListViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
     )
 
+    // 当前作用域（含操作模式），由统一页切换驱动
+    private val currentScope: ScopeState? get() = listDataRepo.scope.value
+
     fun onResume() {
         viewModelScope.launchOnDefault {
-            when (uiState.value) {
-                is Success.Apps -> {
-                    when (opType) {
+            val scope = currentScope ?: return@launchOnDefault
+            when (scope.target) {
+                Target.Apps -> {
+                    when (scope.opType) {
                         OpType.BACKUP -> {
                             val state = uiState.value.castTo<Success.Apps>()
                             if (state.isUpdating.not()) {
@@ -88,8 +101,8 @@ class ListViewModel @Inject constructor(
                     }
                 }
 
-                is Success.Files -> {
-                    when (opType) {
+                Target.Files -> {
+                    when (scope.opType) {
                         OpType.BACKUP -> {
                             val state = uiState.value.castTo<Success.Files>()
                             if (state.isUpdating.not()) {
@@ -100,16 +113,15 @@ class ListViewModel @Inject constructor(
                         OpType.RESTORE -> {}
                     }
                 }
-
-                else -> {}
             }
         }
     }
 
     fun toNextPage(navController: NavHostController) {
-        when (target) {
+        val scope = currentScope ?: return
+        when (scope.target) {
             Target.Apps -> {
-                when (opType) {
+                when (scope.opType) {
                     OpType.BACKUP -> {
                         navController.navigateSingle(MainRoutes.PackagesBackupProcessingGraph.route)
                     }
@@ -117,8 +129,8 @@ class ListViewModel @Inject constructor(
                     OpType.RESTORE -> {
                         navController.navigateSingle(
                             MainRoutes.PackagesRestoreProcessingGraph.getRoute(
-                                cloudName = cloudName.ifEmptyEncodeURLWithSpace(),
-                                backupDir = backupDir.ifEmptyEncodeURLWithSpace()
+                                cloudName = scope.cloudName.ifEmptyEncodeURLWithSpace(),
+                                backupDir = scope.backupDir.ifEmptyEncodeURLWithSpace()
                             )
                         )
                     }
@@ -126,7 +138,7 @@ class ListViewModel @Inject constructor(
             }
 
             Target.Files -> {
-                when (opType) {
+                when (scope.opType) {
                     OpType.BACKUP -> {
                         navController.navigateSingle(MainRoutes.MediumBackupProcessingGraph.route)
                     }
@@ -134,8 +146,8 @@ class ListViewModel @Inject constructor(
                     OpType.RESTORE -> {
                         navController.navigateSingle(
                             MainRoutes.MediumRestoreProcessingGraph.getRoute(
-                                cloudName = cloudName.ifEmptyEncodeURLWithSpace(),
-                                backupDir = backupDir.ifEmptyEncodeURLWithSpace()
+                                cloudName = scope.cloudName.ifEmptyEncodeURLWithSpace(),
+                                backupDir = scope.backupDir.ifEmptyEncodeURLWithSpace()
                             )
                         )
                     }

@@ -76,6 +76,12 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :arrow_right: **Inline version transition badge** — next to the update icon, the list item shows the version transition in a compact form (`1.0 → 1.2`): local → backup on the backup view, cloud → local on the restore view.
 
+* :arrows_counterclockwise: **Unified backup/restore page** — backup and restore share one list with a top segmented switch; filter once, then act on the whole selection (backup, restore, delete backup, or root-uninstall non-system apps).
+
+* :hourglass_flowing_sand: **Last backup time in details** — the backup view app details show the last backup time taken from the latest backup archive.
+
+* :alarm_clock: **Stale backup filter** — new filter "last backup older than N days" (default 30, adjustable, persisted) surfaces apps whose backup has gone stale.
+
 See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D) and the future roadmap (appendix E).
 
 ## Screenshot

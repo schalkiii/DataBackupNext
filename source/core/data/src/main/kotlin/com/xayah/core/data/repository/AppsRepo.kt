@@ -154,6 +154,7 @@ class AppsRepo @Inject constructor(
             .filter(packageRepo.getShowSystemAppsPredicate(value = data.filters.showSystemApps))
             .filter(packageRepo.getHasBackupsPredicate(value = data.filters.hasBackups, pkgUserSet = pSet))
             .filter(packageRepo.getHasNoBackupsPredicate(value = data.filters.hasNoBackups, pkgUserSet = pSet))
+            .filter(packageRepo.getLastBackupOlderThanPredicate(value = data.filters.lastBackupDays, indexMap = indexMap))
             .filter(packageRepo.getUpdatedPredicate(value = data.filters.updatedApps, outdatedSet = outdatedSet))
             .filter(packageRepo.getInstalledPredicate(value = data.filters.installedApps, pkgUserSet = pSet))
             .filter(packageRepo.getNotInstalledPredicate(value = data.filters.notInstalledApps, pkgUserSet = pSet))
@@ -239,6 +240,24 @@ class AppsRepo @Inject constructor(
         appsDao.blockByIds(ids)
     }
 
+    /**
+     * 批量卸载非系统应用：root 卸载指定用户的应用，成功后清除本机备份台账中的对应条目。
+     * 系统应用与卸载失败的应用自动跳过，避免误删。
+     */
+    suspend fun uninstallNonSystemApps(ids: List<Long>) {
+        val removedIds = mutableListOf<Long>()
+        ids.mapNotNull { appsDao.queryById(it) }.forEach { app ->
+            if (app.isSystemApp.not()) {
+                if (rootService.uninstallPackageAsUser(app.packageName, app.userId)) {
+                    removedIds.add(app.id)
+                }
+            }
+        }
+        if (removedIds.isNotEmpty()) {
+            appsDao.deleteByIds(removedIds)
+        }
+    }
+
     suspend fun blockByIds(ids: List<Long>) {
         appsDao.blockByIds(ids)
     }
@@ -282,6 +301,24 @@ class AppsRepo @Inject constructor(
                 }
             }.withLog()
         }
+    }
+
+    /**
+     * 批量删除已选应用的备份归档（删除备份）。
+     * - RESTORE 模式：选中的即备份实体，直接删除；
+     * - BACKUP 模式：选中的是本机已装应用，经包名/用户映射到对应（同云端作用域）备份实体后删除。
+     */
+    suspend fun deleteBackupSelected(ids: List<Long>, fromOpType: OpType) {
+        val targetIds = if (fromOpType == OpType.RESTORE) {
+            ids
+        } else {
+            ids.mapNotNull { appsDao.queryById(it) }
+                .flatMap { local ->
+                    appsDao.query(local.packageName, OpType.RESTORE, local.userId, local.indexInfo.cloud, local.indexInfo.backupDir)
+                        .map { it.id }
+                }
+        }
+        deleteSelected(targetIds)
     }
 
     suspend fun setDataItems(ids: List<Long>, selections: PackageDataStates) {

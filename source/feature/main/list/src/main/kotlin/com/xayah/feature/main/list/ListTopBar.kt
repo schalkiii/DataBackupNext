@@ -10,6 +10,9 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
@@ -117,11 +120,42 @@ internal fun ListTopBar(
 
         AnimatedVisibility(visible = uiState is ListTopBarUiState.Success.Apps) {
             val state = uiState.castTo<ListTopBarUiState.Success.Apps>()
+            // 统一页模式切换：备份 ↔ 恢复
+            ModeSwitch(opType = state.opType, onSwitch = viewModel::switchMode)
             UserTabs(selected = state.userIndex, userList = state.userList, usersMap = state.userMap, onTabClick = viewModel::setUser)
         }
 
         AnimatedVisibility(visible = uiState !is ListTopBarUiState.Success.Apps) {
             Divider(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeSwitch(opType: OpType, onSwitch: () -> Unit) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .paddingHorizontal(SizeTokens.Level16)
+            .paddingVertical(SizeTokens.Level8)
+    ) {
+        SegmentedButton(
+            selected = opType == OpType.BACKUP,
+            onClick = {
+                if (opType != OpType.BACKUP) onSwitch()
+            },
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+        ) {
+            Text(text = stringResource(id = R.string.backup))
+        }
+        SegmentedButton(
+            selected = opType == OpType.RESTORE,
+            onClick = {
+                if (opType != OpType.RESTORE) onSwitch()
+            },
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+        ) {
+            Text(text = stringResource(id = R.string.restore))
         }
     }
 }
