@@ -25,6 +25,7 @@ import com.xayah.core.util.filesDir
 import com.xayah.core.util.logDir
 import com.xayah.core.util.model.ShellResult
 import com.xayah.core.util.withIOContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -55,21 +56,37 @@ private class EnvInitializer : Shell.Initializer() {
 }
 
 object BaseUtil {
+    // 保存应用上下文：shell 会话失效时重建默认 builder 需要重新读取自定义 su 配置
+    private var appContext: Context? = null
+
     private suspend fun getShellBuilder(context: Context) = Shell.Builder.create()
         .setFlags(Shell.FLAG_MOUNT_MASTER or Shell.FLAG_REDIRECT_STDERR)
         .setInitializers(EnvInitializer::class.java)
         .setCommands(context.readCustomSUFile().first())
-        .setTimeout(3)
+        // shell 验证超时：官方默认 20 秒，过短会在 su 启动稍慢时验证超时并强制关闭 shell，
+        // 导致后续所有命令连环失败（表现为备份过程中 Broken pipe 后全部秒失败）
+        .setTimeout(20)
 
     private suspend fun getNewShell(context: Context): Shell? = runCatching { getShellBuilder(context).build() }.getOrNull()
 
     suspend fun initializeEnvironment(context: Context) = run {
         // Set up shell environment.
+        appContext = context
         Shell.enableVerboseLogging = BuildConfigUtil.ENABLE_VERBOSE
         Shell.setDefaultBuilder(getShellBuilder(context))
 
         // Set up LogUtil.
         LogUtil.initialize(context, context.logDir())
+    }
+
+    /**
+     * 执行单条命令并返回退出码与输出，异常照常抛出。
+     */
+    private suspend fun runJob(input: String, shell: Shell?): Pair<Int, List<String>> = if (shell == null) {
+        Shell.cmd(input).exec().let { it.code to it.out }
+    } else {
+        val outList = mutableListOf<String>()
+        shell.newJob().to(outList, outList).add(input).exec().let { it.code to outList }
     }
 
     suspend fun execute(vararg args: String, shell: Shell? = null, log: Boolean = true): ShellResult = withIOContext {
@@ -79,18 +96,21 @@ object BaseUtil {
             log { TAG_SHELL_IN to shellResult.inputString }
         }
 
-        if (shell == null) {
-            Shell.cmd(shellResult.inputString).exec().also { result ->
-                shellResult.code = result.code
-                shellResult.out = result.out
-            }
-        } else {
-            val outList = mutableListOf<String>()
-            shell.newJob().to(outList, outList).add(shellResult.inputString).exec().also { result ->
-                shellResult.code = result.code
-                shellResult.out = outList
-            }
+        // 首次执行抛异常视为 shell 会话失效（Broken pipe、验证超时等）：
+        // 重建默认 shell 后重试一次，避免一次会话故障导致后续命令连环失败。
+        // 外部传入的 shell 无法重建，保持原行为（异常照常抛出）。
+        val (code, out) = try {
+            runJob(input = shellResult.inputString, shell = shell)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            if (shell != null || appContext == null) throw e
+            log { "BaseUtil" to "Shell session broken, rebuilding and retrying: ${e.message}" }
+            Shell.setDefaultBuilder(getShellBuilder(appContext ?: throw e))
+            runJob(input = shellResult.inputString, shell = shell)
         }
+        shellResult.code = code
+        shellResult.out = out
 
         if (log) {
             if (shellResult.outString.trim().isNotEmpty())

@@ -2,6 +2,8 @@
     <item name="backing_up" type="string"/>
     <item name="preprocessing" type="string"/>
     <item name="backup_completed" type="string"/>
+    <item name="backup_aborted_reason" type="string"/>
+    <item name="failed_and_terminated" type="string"/>
     <item name="wait_for_remaining_data_processing" type="string"/>
     <item name="succeed" type="string"/>
     <item name="failed" type="string"/>

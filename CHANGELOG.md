@@ -25,6 +25,9 @@
 
 * **apps:** Invert "updated apps" filter semantics and default to unchecked — checking the box now correctly keeps only apps with newer versions
 * **apps:** Restore details showed 0 bytes per data item for cloud entities — sizes are now preset from the manifest and on-demand local recalculation is skipped for cloud entries
+* **backup:** Recover from a broken shell session instead of failing every subsequent command — on an execution exception (e.g. Broken pipe) the default shell is rebuilt and the command retried once
+* **backup:** Raise the root shell verification timeout from 3s to the library default 20s — the short timeout force-closed the shell when su started slowly, cascading into fast failures for all remaining backups
+* **backup:** Abort the remaining backups immediately with a clear notification when a fatal storage error (No space left / Broken pipe) is detected, instead of failing every remaining app in rapid succession
 
 
 ### Test

@@ -165,15 +165,33 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
         }
     }
 
+    /**
+     * 备份过程中的致命错误：磁盘写满（No space left）或归档管道断裂（Broken pipe）。
+     * 此类错误在空间/会话恢复前对所有后续备份成立，继续执行只会连环秒失败并产生误导性的失败计数，
+     * 因此检测到即中止剩余任务。
+     */
+    private fun TaskDetailPackageEntity.getFatalBackupError(): String? {
+        val logs = apkInfo.log + userInfo.log + userDeInfo.log + dataInfo.log + obbInfo.log + mediaInfo.log
+        return when {
+            logs.contains("No space left") -> "no space left on device"
+            logs.contains("Broken pipe") -> "broken pipe"
+            else -> null
+        }
+    }
+
     override suspend fun onProcessing() {
         // createTargetDirs() before readStatFs().
         mTaskEntity.update(rawBytes = mTaskRepo.getRawBytes(TaskType.PACKAGE), availableBytes = mTaskRepo.getAvailableBytes(OpType.BACKUP), totalBytes = mTaskRepo.getTotalBytes(OpType.BACKUP), totalCount = mPkgEntities.size)
         log { "Task count: ${mPkgEntities.size}." }
+        if (mTaskEntity.rawBytes > mTaskEntity.availableBytes) {
+            // 压缩可缩小体积，此处仅预警；实际写满由下方 getFatalBackupError 检测并中止
+            log { "Warning: rawBytes(${mTaskEntity.rawBytes}) exceeds availableBytes(${mTaskEntity.availableBytes})." }
+        }
 
         val killAppOption = mContext.readKillAppOption().first()
         log { "Kill app option: $killAppOption" }
 
-        mPkgEntities.forEachIndexed { index, pkg ->
+        for ((index, pkg) in mPkgEntities.withIndex()) {
             executeAtLeast {
                 NotificationUtil.notify(
                     mContext,
@@ -233,6 +251,19 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 pkg.update(state = if (pkg.isSuccess) OperationState.DONE else OperationState.ERROR)
             }
             mTaskEntity.update(processingIndex = mTaskEntity.processingIndex + 1)
+
+            // 磁盘写满/管道断裂时剩余备份必然连环失败，立即中止并给出明确原因
+            pkg.getFatalBackupError()?.let { reason ->
+                log { "Aborting the remaining backups: $reason" }
+                NotificationUtil.notify(
+                    mContext,
+                    mNotificationBuilder,
+                    mContext.getString(R.string.failed_and_terminated),
+                    mContext.getString(R.string.backup_aborted_reason),
+                    ongoing = false
+                )
+                return
+            }
         }
     }
 

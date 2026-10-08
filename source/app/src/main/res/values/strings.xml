@@ -60,6 +60,7 @@
     <string name="not_exist">Does not exist</string>
     <string name="not_exist_and_skip">Not exist and skip</string>
     <string name="backup_completed">Backup completed</string>
+    <string name="backup_aborted_reason">Backup aborted: storage is full or the transfer was interrupted. Please free up space and retry.</string>
     <string name="word_return">Return</string>
     <string name="time">Time</string>
     <string name="export">Export</string>
