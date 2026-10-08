@@ -23,6 +23,7 @@
 
 ### Bug Fixes
 
+* **apps:** Fix crash when entering the backup/restore list — `onResume` force-cast the still-`Loading` uiState to `Success` (ClassCastException) before the first emission; the refresh is now skipped until the state is ready
 * **apps:** Invert "updated apps" filter semantics and default to unchecked — checking the box now correctly keeps only apps with newer versions
 * **apps:** Restore details showed 0 bytes per data item for cloud entities — sizes are now preset from the manifest and on-demand local recalculation is skipped for cloud entries
 * **backup:** Recover from a broken shell session instead of failing every subsequent command — on an execution exception (e.g. Broken pipe) the default shell is rebuilt and the command retried once

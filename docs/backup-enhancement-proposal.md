@@ -1336,3 +1336,24 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 ### G.7 交付与提示
 
 交付物见 `/workspace` 与 `apk/`；本附录记录了统一页的形态与裁决，便于后续直接复用方法论。
+
+## 附录 H：第四轮实测反馈修复 — 列表页闪退（2026-10-09）
+
+### H.1 现象
+
+点击「备份应用」进入列表页，短暂显示「加载中」后 App 闪退；模拟器空数据环境未复现。
+
+### H.2 根因
+
+0c1f1557 统一页重构将 `ListViewModel.onResume()` 外层由 `when (uiState.value) { is Success -> ... else -> {} }` 改为 `when (scope.target)`，丢失了状态判型：`SetOnResume` 在页面组合完成即回调 `onResume()`，而 `uiState` 是 `stateIn(initialValue = Loading)`，首帧仍为 `Loading`（14 路 combine 需等 Room 计数、全表扫描、root 查询全部就绪，真机数据量大时明显慢于协程调度），`Loading.castTo<Success.Apps>()` 抛出 `ClassCastException` 未被捕获导致闪退。模拟器空库时 combine 发射极快，竞态侥幸不触发。
+
+### H.3 修复
+
+恢复判型后取值（与 `ListActionsViewModel`/`DetailsViewModel` 既有惯用法一致）：`if (uiState.value is Success.Apps) { val state = uiState.value.castTo<Success.Apps>() ... }`，`Loading` 时跳过本次刷新；Files 分支同理。涉及 `ListViewModel.kt`，CHANGELOG 同步。
+
+### H.4 经验
+
+- `stateIn(initialValue = Loading)` 的 StateFlow 不可假定 `.value` 为 `Success`：自动触发路径（生命周期回调）与用户手势路径同样必须判型后取值；
+- 重构删除守卫（`else -> {}`）时须逐条确认被删代码无保护语义；竞态类缺陷在空数据模拟器不显形，需真机/大数据量回归；
+- `castTo<T>()` 为不安全强转，仅可在已判型后使用；
+- 构建备忘：cgroup 4GB 内存下 Gradle daemon + Kotlin daemon 双 JVM 合计会触发 OOM，追加 `-Dkotlin.compiler.execution.strategy=in-process` 收敛为单 JVM（`-Xmx2048m`）后构建通过。

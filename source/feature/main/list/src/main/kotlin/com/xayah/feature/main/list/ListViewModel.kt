@@ -91,9 +91,12 @@ class ListViewModel @Inject constructor(
                 Target.Apps -> {
                     when (scope.opType) {
                         OpType.BACKUP -> {
-                            val state = uiState.value.castTo<Success.Apps>()
-                            if (state.isUpdating.not()) {
-                                WorkManagerInitializer.fastInitializeAndUpdateApps(context)
+                            // 进入页面瞬间 uiState 首帧仍为 Loading（列表数据尚未发射），判型后取值避免强转崩溃
+                            if (uiState.value is Success.Apps) {
+                                val state = uiState.value.castTo<Success.Apps>()
+                                if (state.isUpdating.not()) {
+                                    WorkManagerInitializer.fastInitializeAndUpdateApps(context)
+                                }
                             }
                         }
 
@@ -104,9 +107,12 @@ class ListViewModel @Inject constructor(
                 Target.Files -> {
                     when (scope.opType) {
                         OpType.BACKUP -> {
-                            val state = uiState.value.castTo<Success.Files>()
-                            if (state.isUpdating.not()) {
-                                WorkManagerInitializer.fastInitializeAndUpdateFiles(context)
+                            // 同上：uiState 未就绪时跳过本次刷新，待后续 resume 再触发
+                            if (uiState.value is Success.Files) {
+                                val state = uiState.value.castTo<Success.Files>()
+                                if (state.isUpdating.not()) {
+                                    WorkManagerInitializer.fastInitializeAndUpdateFiles(context)
+                                }
                             }
                         }
 
