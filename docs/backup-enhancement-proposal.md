@@ -1357,3 +1357,12 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 - 重构删除守卫（`else -> {}`）时须逐条确认被删代码无保护语义；竞态类缺陷在空数据模拟器不显形，需真机/大数据量回归；
 - `castTo<T>()` 为不安全强转，仅可在已判型后使用；
 - 构建备忘：cgroup 4GB 内存下 Gradle daemon + Kotlin daemon 双 JVM 合计会触发 OOM，追加 `-Dkotlin.compiler.execution.strategy=in-process` 收敛为单 JVM（`-Xmx2048m`）后构建通过。
+
+### H.5 构建环境重建备忘（沙箱重置 + 镜像源方案，2026-10-10）
+
+沙箱重置后 JDK17/Android SDK/Gradle 缓存全部丢失，且网络状况变化导致两条主链路不可用/极慢，重建时按下列方案恢复（全程约 10 分钟）：
+
+- **maven.google.com 经代理 SSL 被掐断**（curl 报 `SSL routines::unexpected eof`，Gradle 亦无法解析 google() 仓库，表现为插件如 crashlytics `not found`）：写 `~/.gradle/init.gradle.kts`，经 `beforeSettings` 向 `pluginManagement` 与 `dependencyResolutionManagement` 注入阿里云镜像（`maven.aliyun.com/repository/{google,public,gradle-plugin}`），置于项目仓库之前优先命中，项目文件零改动；实测 public 源 17.8MB/s；
+- **dl.google.com 经代理仅 ~50KB/s**（SDK 组件直装需数小时）：SDK 组件改从腾讯云镜像 `mirrors.cloud.tencent.com/AndroidSDK`（实测 21.9MB/s，833MB 约 32s 下载完）手动安装：先取 `repository2-3.xml` 清单查准包名（platform-35_r02 / build-tools_r35_linux / android-ndk-r25c-linux / cmake-3.22.1-linux / platform-tools_r37.0.1-linux / commandlinetools-11076708），解压就位时注意：cmake zip 无顶层目录需直接解至 `$SDK/cmake/3.22.1/`，build-tools 内层目录为 `android-15` 需改名 `35.0.0`，NDK 内层 `android-ndk-r25c` 需改名 `25.2.9519653`，并手写 `licenses/android-sdk-license` 哈希；
+- AGP 对手动安装的 platform-tools 报 inconsistent location 并自行补装（9MB 小包，走慢速源可接受）；NDK/CMake/platforms/build-tools 凭 zip 内置 `source.properties` 均被正确识别，不会触发大件重下；
+- `services.gradle.org`（Gradle 8.13 分发包 ~137MB）、`repo.maven.apache.org`、`jitpack.io` 经代理均正常，无需处理；本地 `source/app/build` 中间产物随 /workspace 持久化时，重编译仅执行最终打包任务（6m41s）。
