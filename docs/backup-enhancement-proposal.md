@@ -1366,3 +1366,31 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 - **dl.google.com 经代理仅 ~50KB/s**（SDK 组件直装需数小时）：SDK 组件改从腾讯云镜像 `mirrors.cloud.tencent.com/AndroidSDK`（实测 21.9MB/s，833MB 约 32s 下载完）手动安装：先取 `repository2-3.xml` 清单查准包名（platform-35_r02 / build-tools_r35_linux / android-ndk-r25c-linux / cmake-3.22.1-linux / platform-tools_r37.0.1-linux / commandlinetools-11076708），解压就位时注意：cmake zip 无顶层目录需直接解至 `$SDK/cmake/3.22.1/`，build-tools 内层目录为 `android-15` 需改名 `35.0.0`，NDK 内层 `android-ndk-r25c` 需改名 `25.2.9519653`，并手写 `licenses/android-sdk-license` 哈希；
 - AGP 对手动安装的 platform-tools 报 inconsistent location 并自行补装（9MB 小包，走慢速源可接受）；NDK/CMake/platforms/build-tools 凭 zip 内置 `source.properties` 均被正确识别，不会触发大件重下；
 - `services.gradle.org`（Gradle 8.13 分发包 ~137MB）、`repo.maven.apache.org`、`jitpack.io` 经代理均正常，无需处理；本地 `source/app/build` 中间产物随 /workspace 持久化时，重编译仅执行最终打包任务（6m41s）。
+
+## 附录 I：FTP 备份 broken pipe 修复（2026-10-10）
+
+### I.1 现象
+
+每次备份到链家（`com.homelink.android`，APK 265MiB + USER 166MiB）必现 broken pipe；任务详情显示 APK 上传成功，USER 上传报 `java.net.SocketException: Software caused connection abort`（PASV 阶段），USER_DE 报 `Broken pipe`，其后所有应用备份快速失败。
+
+### I.2 根因
+
+`FTPClientImpl` 全任务只复用一条 FTP 控制连接，且无保活、无重连重试：
+
+- 数据打包（tar+zstd）在本地进行，此间隙控制连接完全空闲；链家 USER 数据 166MiB 打包耗时最长，连接被 FTP 服务端/网络设备按空闲超时断开（每次都在链家 = 它数据量最大、空闲窗口最长）；
+- 断连后 `storeFile` 的 PASV 命令写 socket 即抛 `Software caused connection abort` / `Broken pipe`；
+- 级联失败机制：后续每个应用先经 `onAppDirCreated → mkdirRecursively` 建远程目录，死连接上抛异常被 `runCatchingOnService` 捕获返回 false，整个应用被跳过（“后面所有备份快速失败”）；
+- 同根因另一面：`upload` 未检查 `storeFile` 返回值，长传输中途被 426 中止且已写入部分字节时，截断的归档会被当作上传成功。
+
+### I.3 修复（FTPClientImpl.kt 单文件）
+
+- `connect()` 设置 `controlKeepAliveTimeout = 30`：长传输期间周期发 NOOP 保活控制连接；
+- 新增 `withClientRetry` + `reconnect`：命令抛 IOException 后静默关旧 socket、重新登录、恢复工作目录（先取 `printWorkingDirectory`，取不到退回 `"/"` 即 `mkdirRecursively` 收尾状态，保证相对路径落点一致），重试一次；应用于 `upload` 与 `mkdirRecursively`（后者覆盖级联跳过路径）；
+- `upload` 显式检查 `storeFile` 返回值，传输未确认即判失败。
+
+### I.4 经验
+
+- 长连接类客户端（FTP/SSH 等）在“本地准备 → 远程传输”交替的任务中存在必然的空闲窗口，须同时具备**保活**（防断）与**断连自愈**（断后重连重试）；二者缺一都会把单次网络抖动放大成整个任务失败；
+- 诊断技巧：级联快速失败的共同特征是“第一个失败命令之后全部秒败”，优先怀疑共享连接已死，而非逐个命令排查；
+- 进度类回调的传输必须检查底层 API 的返回值（`storeFile` 的 false + 部分字节写入 = 静默截断），备份工具尤须以完整性优先；
+- `download` 路径存在同类暴露（恢复任务同样有传输间隙），本次按需未改，如恢复侧复现可直接套用 `withClientRetry`。

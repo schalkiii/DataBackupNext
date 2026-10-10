@@ -41,9 +41,36 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         block(client!!)
     }
 
+    /**
+     * 控制连接可能在两次传输之间的空闲窗口（本地打包/压缩间隙）被服务端或网络设备按空闲超时断开，
+     * 此后每条命令都会以 Broken pipe / connection abort 快速失败，殃及整个剩余任务。
+     * 断连后重新登录并恢复工作目录，将命令重试一次以自愈；仅重试一次，真正的错误仍会正常抛出。
+     */
+    private fun withClientRetry(block: (client: FTPClient) -> Unit) = run {
+        // 先记录当前工作目录；连接已断开时取不到，退回 “/”（mkdirRecursively 收尾的默认状态），保证相对路径落点一致
+        val cwd = runCatching { client?.printWorkingDirectory() }.getOrNull() ?: "/"
+        try {
+            withClient(block)
+        } catch (e: IOException) {
+            log { "Connection lost: ${e.localizedMessage}, reconnecting and retrying once." }
+            reconnect()
+            withClient { it.changeWorkingDirectory(cwd) }
+            withClient(block)
+        }
+    }
+
+    private fun reconnect() = run {
+        // 旧连接多半已被对端断开，静默关闭 socket 即可，避免残留
+        runCatching { client?.disconnect() }
+        client = null
+        connect()
+    }
+
     override fun connect() {
         client = FTPClient().apply {
             autodetectUTF8 = true
+            // 大文件传输期间控制连接长时间无命令，周期发送 NOOP 保活，避免被服务端/网络设备按空闲超时断开
+            controlKeepAliveTimeout = 30L
             connect(entity.host, extra.port)
             if (login(entity.user, entity.pass).not()) throw LoginException("Failed to login, user: ${entity.user}, pass: ${entity.pass}.")
             enterLocalPassiveMode()
@@ -67,9 +94,10 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         if (client.makeDirectory(dst).not()) throw IOException("Failed to mkdir: $dst.")
     }
 
+    // 每个备份目录的创建都可能撞上断连，重试使后续应用不再被一次断连整体跳过
     override fun mkdirRecursively(dst: String) {
         val dirs = dst.split("/")
-        withClient { client ->
+        withClientRetry { client ->
             for (i in dirs) {
                 if (client.changeWorkingDirectory(i).not()) {
                     mkdir(i)
@@ -85,7 +113,7 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         if (client.rename(src, dst).not()) throw IOException("Failed to rename file from $src to $dst.")
     }
 
-    override fun upload(src: String, dst: String, onUploading: (read: Long, total: Long) -> Unit) = withClient { client ->
+    override fun upload(src: String, dst: String, onUploading: (read: Long, total: Long) -> Unit) = withClientRetry { client ->
         val name = PathUtil.getFileName(src)
         val dstPath = "$dst/$name"
         log { "upload: $src to $dstPath" }
@@ -93,7 +121,9 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         val srcFileSize = srcFile.length()
         val srcInputStream = FileInputStream(srcFile)
         val countingStream = CountingInputStreamImpl(srcInputStream, srcFileSize) { read, total -> onUploading(read, total) }
-        client.storeFile(dstPath, countingStream)
+        // storeFile 返回 false 表示传输未被服务端确认（如中途 426 中止），此时可能已写入部分字节，
+        // 必须显式判失败，否则截断的归档会被当作上传成功
+        if (client.storeFile(dstPath, countingStream).not()) throw IOException("Failed to write remote file.")
         srcInputStream.close()
         countingStream.close()
         if (countingStream.byteCount == 0L) throw IOException("Failed to write remote file: 0 byte.")

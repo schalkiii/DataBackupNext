@@ -82,7 +82,7 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :alarm_clock: **Stale backup filter** — new filter "last backup older than N days" (default 30, adjustable, persisted) surfaces apps whose backup has gone stale.
 
-See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D, F-H) and the future roadmap (appendix E).
+See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D, F-I) and the future roadmap (appendix E).
 
 ## Screenshot
 <div align="center">

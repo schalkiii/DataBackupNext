@@ -23,6 +23,8 @@
 
 ### Bug Fixes
 
+* **cloud:** Keep the FTP control connection alive during long transfers and recover from mid-task disconnects — after a dropped connection (Broken pipe / connection abort) the client now reconnects, restores the working directory and retries the command once, instead of failing every remaining upload fast
+* **cloud:** FTP uploads now check the transfer result — an aborted transfer (e.g. 426) with partial bytes written is reported as an error instead of silently marking a truncated archive as success
 * **apps:** Fix crash when entering the backup/restore list — `onResume` force-cast the still-`Loading` uiState to `Success` (ClassCastException) before the first emission; the refresh is now skipped until the state is ready
 * **apps:** Invert "updated apps" filter semantics and default to unchecked — checking the box now correctly keeps only apps with newer versions
 * **apps:** Restore details showed 0 bytes per data item for cloud entities — sizes are now preset from the manifest and on-demand local recalculation is skipped for cloud entries
