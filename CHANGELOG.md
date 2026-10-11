@@ -5,6 +5,7 @@
 
 ### Features
 
+* **build/CI:** Secret-free **Debug APK** GitHub Actions workflow — trigger it from the Actions tab (or push / tag `v*`) and download the APK from the run's artifacts; no local JDK/SDK/NDK setup and no signing secrets required. Sits alongside the existing signed-release `Build` workflow.
 * **apps:** Updated apps detection — filter apps whose installed version is newer than the backed-up one
 * **apps:** Sort apps by last backup time (ascending/descending)
 * **cloud:** Incremental list sync via `apps_index.json` manifest — single download replaces per-app remote queries, with graceful fallback to full scan

@@ -949,6 +949,7 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
   - 2.x：`./gradlew test`、`./gradlew lint`、`./gradlew :core:data:test`
   - Next：`./gradlew test`、`./gradlew lint`、`:app:testDebugUnitTest`（见 `source-next/AGENTS.md:23-29`）
 - 覆盖率红线：`core/data`、`core/database`、`util` 三类包新增/修改代码行覆盖率 ≥ 70%，其中**删除/轮转相关代码为 100%**（涉及数据安全）。
+- GitHub Actions 既有一套流水线，避免本地装 JDK/SDK/NDK：`lint.yaml`（push/PR 跑 `lint test`）、`build.yaml`（签名 Release，需 signing secrets）、`bin.yaml`（fdroid 容器里产 `bin.zip`）；本次新增 `debug-apk.yaml` 补齐**免签名 Debug APK**（Actions 页手动触发或 push/tag `v*`，产物在 Artifacts，可选 ABI/flavor），解决「本地不想装编译环境、云端服务器性能受限」的取包痛点。
 
 ### 8.6 验证与里程碑的配对矩阵
 

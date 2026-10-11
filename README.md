@@ -113,6 +113,17 @@ cd source
 ./gradlew :core:model:testDebugUnitTest :core:data:testDebugUnitTest :core:service:testDebugUnitTest :core:network:testDebugUnitTest
 ```
 
+Build the APK **without installing the toolchain locally** — trigger the **Debug APK** workflow from the GitHub Actions tab (or just push / tag `v*`), then download the artifact from the run page. It needs no signing secrets and you can pick the ABI / flavor in the run dialog.
+
+Prefer a local build instead (requires JDK 17 + Android SDK + NDK/CMake):
+
+```bash
+cd source
+./gradlew assembleArm64-v8aFossDebug
+```
+
+Signed release APKs are produced by the separate **Build** workflow and need the signing secrets configured.
+
 Design notes and the unit test coverage matrix are archived in [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md).
 
 ## Translation
