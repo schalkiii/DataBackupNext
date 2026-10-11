@@ -154,13 +154,12 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
         val mainEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, DefaultPreserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir) ?: return
 
         // 清理超出保留数的最旧副本（定向查询同 pkg/user 实体，避免每应用全量扫描整张表）
-        mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, mTaskEntity.cloud, mTaskEntity.backupDir)
-            .filter { it.preserveId != DefaultPreserveId }
-            .sortedByDescending { it.extraInfo.lastBackupTime }
-            .drop(retainCopies - 1)
-            .forEach { copy ->
-                if (onDeleteCopy(copy)) mPackageDao.delete(copy.id)
-            }
+        selectCopiesToPrune(
+            copies = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, mTaskEntity.cloud, mTaskEntity.backupDir),
+            retainCopies = retainCopies,
+        ).forEach { copy ->
+            if (onDeleteCopy(copy)) mPackageDao.delete(copy.id)
+        }
 
         // 主备份轮转为时间戳副本，本次备份将产出新主备份
         val rotated = mainEntity.copy(id = 0, indexInfo = mainEntity.indexInfo.copy(preserveId = DateUtil.getTimestamp()))
@@ -381,4 +380,17 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
             ongoing = false
         )
     }
+}
+
+/**
+ * 多副本保留策略：主备份（preserveId=0）不参与裁剪，副本按备份时间倒序
+ * 保留前 retainCopies-1 个，返回应删除的最旧副本。retainCopies<=1 表示
+ * 禁用多副本（仅覆盖式备份），不做任何裁剪。
+ */
+internal fun selectCopiesToPrune(copies: List<PackageEntity>, retainCopies: Int): List<PackageEntity> {
+    if (retainCopies <= 1) return emptyList()
+    return copies
+        .filter { it.preserveId != DefaultPreserveId }
+        .sortedByDescending { it.extraInfo.lastBackupTime }
+        .drop(retainCopies - 1)
 }

@@ -697,8 +697,9 @@ class AppsRepo @Inject constructor(
     /**
      * 清单增量同步：一次下载 apps_index.json 重建本地列表，
      * 批量结算改为本地 diff，免去逐 app 的远程调用。
+     * internal 供单元测试直接覆盖编排语义。
      */
-    private suspend fun loadCloudAppsByIndex(
+    internal suspend fun loadCloudAppsByIndex(
         client: CloudClient,
         entity: CloudEntity,
         onLoad: suspend (cur: Int, max: Int, content: String) -> Unit,
@@ -712,19 +713,35 @@ class AppsRepo @Inject constructor(
             manifest = rootService.readJson<CloudIndexManifest>(path)
         }.also { if (it.isSuccess.not()) return false }
 
-        val loaded = manifest ?: return false
+        syncCloudIndex(manifest, entity, onLoad)
+    }.getOrElse {
+        LogUtil.log { "AppsRepo" to "loadCloudAppsByIndex failed: ${it.localizedMessage}" }
+        false
+    }
+
+    /**
+     * 清单落库：schema 校验后按 cloudIndexKey 与本地条目做 diff，
+     * 命中条目复用行 id 并保留本机选中状态，清单外条目删除。
+     * 与远端 I/O 分离，internal 供单元测试直接覆盖同步语义。
+     */
+    internal suspend fun syncCloudIndex(
+        loaded: CloudIndexManifest?,
+        entity: CloudEntity,
+        onLoad: suspend (cur: Int, max: Int, content: String) -> Unit,
+    ): Boolean {
+        if (loaded == null) return false
         if (loaded.schemaVersion > CloudIndexSchemaVersion) return false
 
         onLoad(0, 1, CloudAppsIndexName)
         @Suppress("UNNECESSARY_SAFE_CALL")
         val packages = loaded.packages ?: return false
-        val existing = appsDao.queryPackages(OpType.RESTORE, entity.name, remote)
+        val existing = appsDao.queryPackages(OpType.RESTORE, entity.name, entity.remote)
         val existingMap = existing.associateBy { it.cloudIndexKey }
 
         val upserts = packages.map { p ->
             p.id = 0
             p.indexInfo.cloud = entity.name
-            p.indexInfo.backupDir = remote
+            p.indexInfo.backupDir = entity.remote
             p.extraInfo.activated = false
             // 已存在条目复用行 id 并保留本机选中状态
             existingMap[p.cloudIndexKey]?.also { old ->
@@ -740,10 +757,7 @@ class AppsRepo @Inject constructor(
         existing.filter { it.cloudIndexKey !in indexKeys }.forEach { appsDao.delete(it.id) }
 
         onLoad(1, 1, CloudAppsIndexName)
-        true
-    }.getOrElse {
-        LogUtil.log { "AppsRepo" to "loadCloudAppsByIndex failed: ${it.localizedMessage}" }
-        false
+        return true
     }
 
     /**

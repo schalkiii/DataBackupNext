@@ -1460,3 +1460,34 @@ H.5 方案复用补充（2026-10-11 二次重建实测）：
 - **一对对称 API（upload/download）修一半等于留坑**：I.4 记录了 download 的同类暴露但“按需未改”，本次审查补齐；对称接口的防护（重试/判空/结果校验/资源释放）应成对落地；
 - **`withIndex`/递归/循环里的“返回值即结果”型调用**：递归调用若返回值被丢弃，几乎总是 bug（`size()` 案例），审查时对“有返回值但未使用”的调用零容忍；
 - **Flow 组合的重启粒度**：`flatMapLatest` 的上游应先收缩到真正决定作用域的最小键集合并 `distinctUntilChanged`，否则任何无关状态（搜索词、排序）都会放大成数据源重建；Compose/Flow 场景下这是列表卡顿的常见根因。
+
+## 附录 L：单元测试覆盖矩阵（2026-10-11）
+
+为 2.x 轨道补齐 JVM 单元测试基建（JDK 17 + `library.test` convention 提供 JUnit4 + mockk 1.13.13，镜像与缓存复用附录 H.5 的沙箱构建手册），按“model 纯函数 / data 清单同步与筛选 / service 保留策略 / network 计数流”四个维度铺满覆盖矩阵：
+
+| 模块 | 测试文件 | 覆盖点 | 用例数 |
+| ---- | ---- | ---- | ---- |
+| core/model | `BackupStatusTest` | 备份状态聚合、`cloudIndexKey` 构成 | 6 |
+| core/model | `CloudIndexManifestTest` | 索引清单序列化/反序列化 | 5 |
+| core/model | `VersionTransitionTest` | 版本差徽标文案 | 4 |
+| core/model | `UnitTest` | `formatSize` 分档（固定 Locale 消除 DecimalFormat 本地化差异） | 1 |
+| core/data | `PackageRepositoryPredicatesTest` | 筛选谓词（更新/云更新/未备份/N 天未备份/关键词） | 13 |
+| core/data | `AppsRepoBackupIndexTest` | 备份台账基线、同包名不同用户独立键、空列表 | 7 |
+| core/data | `AppsRepoCloudIndexSyncTest` | 清单增量同步语义与回退门禁 | 7 |
+| core/data | `AppsRepoGetAppsFlowTest` | 恢复页流重建粒度、关键词大小写、选中置顶 | 3 |
+| core/data | `ListDataRepoSourceScopeTest` | 来源记忆解析与失效回退 | 5 |
+| core/service | `SelectCopiesToPruneTest` | 多副本保留策略边界 | 4 |
+| core/network | `CountingStreamsTest` | 计数输入/输出流与进度回调 | 3 |
+
+合计 58 例，`./gradlew :core:model:testDebugUnitTest :core:data:testDebugUnitTest :core:service:testDebugUnitTest :core:network:testDebugUnitTest` 全绿。
+
+### L.1 可测性重构（为测试让路的最小生产改动）
+
+- **清单落库与远端 I/O 分离**（`AppsRepo.syncCloudIndex`）：`loadCloudAppsByIndex` 拆出同步语义（schema 门禁 + `cloudIndexKey` diff + 命中复用行 id/保留选中 + 清单外删除），测试直接构造清单对象断言 DAO 调用；编排层仅剩“清单不存在 / 下载失败回退全量扫描”两个分支，用接口 mock 覆盖；
+- **多副本保留策略纯函数化**（`selectCopiesToPrune`）：与 `rotateCopies` 的数据库副作用分离，边界（保留数 ≤1 禁用、未超量不裁剪、超额删最旧、主备份不参与）直接断言返回值。
+
+### L.2 经验
+
+- **mockk 无法插桩 `RemoteRootService` 的 suspend 方法**：`coEvery` 录制期真实方法体被执行（表现为 `Missing mocked calls` / `left matchers` / 懒加载字段 NPE），spyk 与普通 mockk、常量参数与 `any()` 均稳定复现；而接口 suspend、其他 final 类 suspend、同类的非 suspend getter 都正常。规避原则：业务语义抽纯函数，I/O 依赖优先选接口（`PackageDao`/`CloudClient`）做 mock，`RemoteRootService` 只作 relaxed 占位且保证用例路径不触发其 suspend 方法；
+- **依赖 Android/懒加载的工具类用真实实例**：`by lazy` 字段（如 `gsonUtil`）mock getter 不可靠，改用真实 `GsonUtil()`/`spyk` 保留真实行为；
+- **互补筛选对的测试参数必须与生产一致**：`hasBackups/hasNoBackups`、`installedApps/notInstalledApps` 生产默认全 true（双选=显示全部），测试若传 false 会得到互斥过滤后的空列表，误判为实现缺陷。

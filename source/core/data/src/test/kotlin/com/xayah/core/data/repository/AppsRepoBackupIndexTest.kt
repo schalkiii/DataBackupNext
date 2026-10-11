@@ -17,6 +17,7 @@ import com.xayah.core.util.PathUtil
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppsRepoBackupIndexTest {
@@ -82,6 +83,27 @@ class AppsRepoBackupIndexTest {
         assertEquals("1.2", index.backedUpVersionName)
         assertEquals(200L, index.lastBackupTime)
         assertEquals(2, index.copyCount)
+    }
+
+    @Test
+    fun `同包名不同用户走独立台账键`() {
+        val index = repository.getBackupIndexes(
+            copies = listOf(
+                buildRestoreEntity(lastBackupTime = 100L, versionCode = 10L, packageName = "com.example.app", userId = 0),
+                buildRestoreEntity(lastBackupTime = 200L, versionCode = 11L, packageName = "com.example.app", userId = 10),
+            ),
+        )
+
+        assertEquals(2, index.size)
+        assertEquals(10L, index["com.example.app-0"]!!.backedUpVersionCode)
+        assertEquals(11L, index["com.example.app-10"]!!.backedUpVersionCode)
+        assertEquals(1, index["com.example.app-0"]!!.copyCount)
+        assertEquals(1, index["com.example.app-10"]!!.copyCount)
+    }
+
+    @Test
+    fun `空备份列表返回空台账`() {
+        assertTrue(repository.getBackupIndexes(copies = emptyList()).isEmpty())
     }
 
     @Test

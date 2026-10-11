@@ -103,6 +103,16 @@ See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md)
 
 or get the APK from the [Releases](https://github.com/XayahSuSuSu/Android-DataBackup/releases/latest).
 
+## Development
+Unit tests live in each module's `src/test` and run on the JVM (JDK 17, no device needed):
+
+```bash
+cd source
+./gradlew :core:model:testDebugUnitTest :core:data:testDebugUnitTest :core:service:testDebugUnitTest :core:network:testDebugUnitTest
+```
+
+Design notes and the unit test coverage matrix are archived in [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md).
+
 ## Translation
 [<img src="https://hosted.weblate.org/widget/databackup/main/open-graph.png"
      alt="Translation">](https://hosted.weblate.org/engage/databackup/)

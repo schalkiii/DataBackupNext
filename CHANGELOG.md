@@ -54,6 +54,10 @@
 * Add unit tests for version transition formatting and copy selection (5 cases: 4 for version transitions, 1 for same-key copy filtering and ordering)
 * Add unit tests for backup source scope resolution (5 cases: default without memory, restore last cloud, restore last local, remembered cloud deleted, explicit entry takes precedence)
 * Add unit tests for the "last backup older than N days" predicate (5 cases covering disabled value, never-backed-up, missing index and day-threshold boundary)
+* Add unit tests for cloud index incremental sync (7 cases: reuse row id and keep selection, per-user/copy keys, empty manifest clears local rows, fallback to full scan when the manifest is missing or the download fails, schema version gate, null packages gate)
+* Add unit tests for multi-copy retention pruning (4 cases) and counting input/output streams (3 cases)
+* Complete the unit test coverage matrix across `core/model`, `core/data`, `core/service` and `core/network` — 58 JVM cases in total, all green (see the coverage matrix in `docs/backup-enhancement-proposal.md`)
+* Extract `AppsRepo.syncCloudIndex` and `AbstractBackupService.selectCopiesToPrune` as testable pure seams so manifest sync and retention semantics are covered without mocking `RemoteRootService` (behavior unchanged)
 
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)
 
