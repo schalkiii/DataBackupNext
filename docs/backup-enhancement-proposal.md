@@ -1367,6 +1367,14 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 - AGP 对手动安装的 platform-tools 报 inconsistent location 并自行补装（9MB 小包，走慢速源可接受）；NDK/CMake/platforms/build-tools 凭 zip 内置 `source.properties` 均被正确识别，不会触发大件重下；
 - `services.gradle.org`（Gradle 8.13 分发包 ~137MB）、`repo.maven.apache.org`、`jitpack.io` 经代理均正常，无需处理；本地 `source/app/build` 中间产物随 /workspace 持久化时，重编译仅执行最终打包任务（6m41s）。
 
+H.5 方案复用补充（2026-10-11 二次重建实测）：
+
+- **JDK17 不能再走 apt**：沙箱 apt 源只有 JDK11（`openjdk-17-jdk-headless` 无法定位），改从清华 Adoptium 镜像 `mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/linux/` 下 Temurin tarball 解压至 `/opt/jdk`，`export JAVA_HOME=/opt/jdk/jdk-17.x` 即可；
+- **代理与镜像配置固化**：JVM/Gradle 不读取 `HTTP_PROXY` 环境变量，`systemProp.http(s).proxy*` 固化至 `~/.gradle/gradle.properties`，阿里云镜像注入固化至 `~/.gradle/init.gradle.kts`（均为用户目录文件，不在仓库内），此后构建零配置；
+- **内存上限以 cgroup 为准**：`free` 显示 6GB 有误导，`/sys/fs/cgroup/memory.max` 实为 4GB；dex/kapt 阶段 "daemon disappeared"（OOM 被杀）后**直接重试即可**——编译任务全部命中缓存，仅剩 dex/打包重跑（实测 46s），重试前照 D.7 清残留进程；
+- **`pkill -f gradle` 自匹配陷阱**：命令行本身含 "gradle" 字样时 `pkill -9 -f gradle` 会把执行 shell 一并杀掉（表现为 exit -1、无输出），必须写 `pkill -9 -f '[g]radle'` 防自匹配；
+- **Git 非交互细节**：`--no-pager` 是全局选项须前置（`git --no-pager log`，写成 `git log --no-pager` 报非法参数）；经 URL 直推成功后本地 `origin/main` 跟踪引用不会更新，核对远端状态以 `git ls-remote` 为准。
+
 ## 附录 I：FTP 备份 broken pipe 修复（2026-10-10）
 
 ### I.1 现象
