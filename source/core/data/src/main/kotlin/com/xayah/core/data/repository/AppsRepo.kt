@@ -68,6 +68,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -137,11 +138,12 @@ class AppsRepo @Inject constructor(
         labels,
         when (opType) {
             OpType.BACKUP -> appsDao.queryPackagesFlow(opType = opType, blocked = false)
-            // 恢复页作用域跟随来源（本机/云端）筛选，切换来源即重建查询
-            OpType.RESTORE -> listData.flatMapLatest { lData ->
-                val filters = lData.castTo<ListData.Apps>().filters
-                appsDao.queryPackagesFlow(opType = opType, cloud = filters.cloud, backupDir = filters.backupDir)
-            }
+            // 恢复页作用域跟随来源（本机/云端）筛选，切换来源即重建查询；
+            // 仅作用域变化才重启 Room 流，避免搜索/筛选每次按键都重建查询
+            OpType.RESTORE -> listData
+                .map { lData -> lData.castTo<ListData.Apps>().filters.let { f -> f.cloud to f.backupDir } }
+                .distinctUntilChanged()
+                .flatMapLatest { (cloud, backupDir) -> appsDao.queryPackagesFlow(opType = opType, cloud = cloud, backupDir = backupDir) }
         }
     ) { lData, pMap, lRefs, lLabels, apps ->
         val data = lData.castTo<ListData.Apps>()

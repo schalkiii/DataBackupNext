@@ -24,8 +24,6 @@ import org.apache.commons.net.ftp.FTPFile
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
 import javax.security.auth.login.LoginException
 
 class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra) : CloudClient {
@@ -125,32 +123,38 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         log { "upload: $src to $dstPath" }
         val srcFile = File(src)
         val srcFileSize = srcFile.length()
-        val srcInputStream = FileInputStream(srcFile)
-        val countingStream = CountingInputStreamImpl(srcInputStream, srcFileSize) { read, total -> onUploading(read, total) }
-        // storeFile 返回 false 表示传输未被服务端确认（如中途 426 中止），此时可能已写入部分字节，
-        // 必须显式判失败，否则截断的归档会被当作上传成功
-        if (client.storeFile(dstPath, countingStream).not()) throw IOException("Failed to write remote file.")
-        srcInputStream.close()
-        countingStream.close()
-        if (countingStream.byteCount == 0L) throw IOException("Failed to write remote file: 0 byte.")
-        onUploading(countingStream.byteCount, countingStream.byteCount)
+        // use 保证传输失败/中断时文件句柄不泄漏
+        val byteCount = FileInputStream(srcFile).use { srcInputStream ->
+            CountingInputStreamImpl(srcInputStream, srcFileSize) { read, total -> onUploading(read, total) }.use { countingStream ->
+                // storeFile 返回 false 表示传输未被服务端确认（如中途 426 中止），此时可能已写入部分字节，
+                // 必须显式判失败，否则截断的归档会被当作上传成功
+                if (client.storeFile(dstPath, countingStream).not()) throw IOException("Failed to write remote file.")
+                countingStream.byteCount
+            }
+        }
+        if (byteCount == 0L) throw IOException("Failed to write remote file: 0 byte.")
+        onUploading(byteCount, byteCount)
     }
 
-    override fun download(src: String, dst: String, onDownloading: (written: Long, total: Long) -> Unit) = withClient { client ->
+    override fun download(src: String, dst: String, onDownloading: (written: Long, total: Long) -> Unit) = withClientRetry { client ->
         val name = PathUtil.getFileName(src)
         val dstPath = "$dst/$name"
         log { "download: $src to $dstPath" }
         val dstFile = File(dstPath)
-        val srcInputStream: InputStream = client.retrieveFileStream(src)
-        val dstOutPutStream: OutputStream = dstFile.outputStream()
-        val countingStream = CountingOutputStreamImpl(dstOutPutStream, -1) { written, total -> onDownloading(written, total) }
-        // 与传输缓冲同量级，避免下载侧回落到 8KB 默认缓冲
-        srcInputStream.copyTo(countingStream, bufferSize = TRANSFER_BUFFER_SIZE)
-        client.completePendingCommand()
-        srcInputStream.close()
-        dstOutPutStream.close()
-        countingStream.close()
-        onDownloading(countingStream.byteCount, countingStream.byteCount)
+        // 与 upload 判 storeFile 同理：retrieveFileStream 返回 null（服务端拒绝）即失败，
+        // 中途断连由 withClientRetry 重连重试一次（重试会重写本地文件，截断无残留）
+        val byteCount = (client.retrieveFileStream(src) ?: throw IOException("Failed to open remote stream: $src")).use { srcInputStream ->
+            dstFile.outputStream().use { dstOutPutStream ->
+                CountingOutputStreamImpl(dstOutPutStream, -1) { written, total -> onDownloading(written, total) }.use { countingStream ->
+                    // 与传输缓冲同量级，避免下载侧回落到 8KB 默认缓冲
+                    srcInputStream.copyTo(countingStream, bufferSize = TRANSFER_BUFFER_SIZE)
+                    countingStream.byteCount
+                }
+            }
+        }
+        // 数据流关闭后再确认传输结果，未确认即判失败
+        if (client.completePendingCommand().not()) throw IOException("Failed to read remote file: $src.")
+        onDownloading(byteCount, byteCount)
     }
 
     override fun deleteFile(src: String) = withClient { client ->
@@ -289,7 +293,8 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
                     size += client.getSize("${src}/${i.name}")?.toLongOrNull() ?: 0
                 }
                 for (i in files.directories) {
-                    size("${src}/${i.name}")
+                    // 递归结果须累加，否则子目录大小静默丢失
+                    size += size("${src}/${i.name}")
                 }
             }
         }

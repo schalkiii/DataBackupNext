@@ -145,17 +145,17 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
 
     /**
      * 多副本轮转：备份前将现有主备份转为时间戳副本，并按保留数清理最旧副本。
-     * 轮转失败静默降级为覆盖式备份。
+     * 轮转失败静默降级为覆盖式备份。retainCopies 由任务级读取一次后传入，
+     * 避免每应用读一次 DataStore。
      */
-    private suspend fun rotateCopies(p: PackageEntity, dstDir: String) {
-        val retainCopies = mContext.readBackupRetainCopies().first()
+    private suspend fun rotateCopies(p: PackageEntity, retainCopies: Int) {
         if (retainCopies <= 1) return
 
         val mainEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, DefaultPreserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir) ?: return
 
-        // 清理超出保留数的最旧副本
-        mPackageDao.queryPackages(OpType.RESTORE, mTaskEntity.cloud, mTaskEntity.backupDir)
-            .filter { it.packageName == p.packageName && it.userId == p.userId && it.preserveId != DefaultPreserveId }
+        // 清理超出保留数的最旧副本（定向查询同 pkg/user 实体，避免每应用全量扫描整张表）
+        mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, mTaskEntity.cloud, mTaskEntity.backupDir)
+            .filter { it.preserveId != DefaultPreserveId }
             .sortedByDescending { it.extraInfo.lastBackupTime }
             .drop(retainCopies - 1)
             .forEach { copy ->
@@ -195,6 +195,8 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
 
         val killAppOption = mContext.readKillAppOption().first()
         log { "Kill app option: $killAppOption" }
+        // 保留副本数任务级读取一次，供每应用轮转复用
+        val retainCopies = mContext.readBackupRetainCopies().first()
 
         for ((index, pkg) in mPkgEntities.withIndex()) {
             executeAtLeast {
@@ -215,7 +217,7 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 val dstDir = "${mAppsDir}/${p.archivesRelativeDir}"
                 var restoreEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, p.preserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir)
                 mRootService.mkdirs(dstDir)
-                runCatchingOnService { rotateCopies(p = p, dstDir = dstDir) }
+                runCatchingOnService { rotateCopies(p = p, retainCopies = retainCopies) }
                 if (onAppDirCreated(archivesRelativeDir = p.archivesRelativeDir)) {
                     backup(type = DataType.PACKAGE_APK, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
                     backup(type = DataType.PACKAGE_USER, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)

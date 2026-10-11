@@ -24,9 +24,12 @@
 
 ### Bug Fixes
 
+* **backup:** The multi-copy rotation no longer wipes the shared staging directory — its config is written into an isolated temp subdirectory and only that subdirectory is cleaned up, so not-yet-uploaded archives, icons and configs of the current app survive rotation (previously the whole staging tree was deleted before each app's packing when retention > 1)
+* **cloud:** Fix FTP directory size calculation discarding recursive results — sub-directory sizes were silently dropped
 * **backup:** Persist backup progress after every completed app — the cloud index manifest is refreshed per app instead of only at task completion, so an interrupted task keeps its finished backups instead of having them wiped by the next incremental sync (they looked "never backed up")
 * **backup:** The per-app manifest refresh writes into an isolated temp subdirectory and cleans up only that subdirectory, so the shared staging directory holding not-yet-uploaded archives is never deleted
 * **apps:** Fix the owner (user) tabs overlapping the backup/restore switch in the list top bar — `AnimatedVisibility` stacks its children, they are now laid out in an explicit column
+* **cloud:** FTP downloads are now as robust as uploads — the transfer is retried once after a dropped connection, a refused stream and an unconfirmed transfer are reported as errors instead of a NPE or silent truncation, and streams are always closed even on failure (same for uploads)
 * **cloud:** Keep the FTP control connection alive during long transfers and recover from mid-task disconnects — after a dropped connection (Broken pipe / connection abort) the client now reconnects, restores the working directory and retries the command once, instead of failing every remaining upload fast
 * **cloud:** FTP uploads now check the transfer result — an aborted transfer (e.g. 426) with partial bytes written is reported as an error instead of silently marking a truncated archive as success
 * **apps:** Fix crash when entering the backup/restore list — `onResume` force-cast the still-`Loading` uiState to `Success` (ClassCastException) before the first emission; the refresh is now skipped until the state is ready
@@ -39,6 +42,8 @@
 
 ### Performance
 
+* **backup:** Multi-copy rotation reads the retention setting once per task and queries copies per package instead of scanning the whole table on every app — O(N²) → O(N) over the backup set
+* **apps:** The restore list rebuilds its Room query only when the source scope (cloud / backup dir) changes, instead of on every search keystroke or filter toggle
 * **cloud:** Enlarge the FTP data transfer buffer from the library default 1KB to 256KB on both upload and download — fewer syscalls and higher throughput on large archives
 
 

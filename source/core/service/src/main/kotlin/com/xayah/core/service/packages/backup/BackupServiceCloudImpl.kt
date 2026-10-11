@@ -159,12 +159,15 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
     override suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = runCatching {
         val remoteAppDir = "${mRemoteAppsDir}/${src.archivesRelativeDir}"
         val dstDir = "${mRemoteAppsDir}/${dst.archivesRelativeDir}"
-        // 先上传轮转后的 config 再整体改名，与 protectCloudApp 同模式
-        val tmpDir = mPathUtil.getCloudTmpDir()
-        val tmpJsonPath = PathUtil.getPackageRestoreConfigDst(tmpDir)
+        // 先上传轮转后的 config 再整体改名，与 protectCloudApp 同模式。
+        // 本方法在每个应用打包前触发，共享暂存目录里还有待上传的归档/图标，
+        // 配置必须写入独立临时子目录且只清理该子目录，不能删整个暂存目录
+        val tmpRotateDir = "${mPathUtil.getCloudTmpDir()}/rotate"
+        val tmpJsonPath = PathUtil.getPackageRestoreConfigDst(tmpRotateDir)
+        mRootService.mkdirs(tmpRotateDir)
         mRootService.writeJson(data = dst, dst = tmpJsonPath)
         mCloudRepo.upload(client = mClient, src = tmpJsonPath, dstDir = remoteAppDir)
-        mRootService.deleteRecursively(tmpDir)
+        mRootService.deleteRecursively(tmpRotateDir)
         mClient.renameTo(remoteAppDir, dstDir)
     }.isSuccess
 

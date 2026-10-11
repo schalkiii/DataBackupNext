@@ -1434,3 +1434,29 @@ H.5 方案复用补充（2026-10-11 二次重建实测）：
 - **Compose `AnimatedVisibility` 多子项必须显式排布**：其内容默认 Box 叠放，两个以上子项需套 `Column`/`Row`，否则出现互相覆盖的“重叠”视觉；
 - **跨会话筛选状态三类持久化时机**：显式入口参数 > 用户上次选择 > 系统默认，且记忆对象失效（云端账号已删除）时必须静默回退默认，不能抛错或卡住；
 - **FTP 大文件吞吐**：库默认 1KB 传输缓冲是隐形瓶颈，上传（`FTPClient.bufferSize`）与下载（`copyTo` bufferSize）两侧都要放大到同量级。
+
+## 附录 K：代码审查改进 — 潜在问题与性能（2026-10-11）
+
+对附录 J 落盘的改动与周边热点路径做定向审查，发现并修复 2 个缺陷、1 个健壮性缺口、2 个性能问题：
+
+### K.1 缺陷
+
+- **多副本轮转清空共享暂存目录**（`BackupServiceCloudImpl.onRotateCopy`）：轮转在每应用打包**前**触发，却 `deleteRecursively(整个 DataBackupTmpDir)`——`mAppsDir`（归档暂存）、`mConfigsDir`（图标/配置暂存）都在其中，且当前应用的 dstDir 刚 `mkdirs` 完就被删。保留副本数 > 1 时备份行为异常。修复：与索引清单同模式，配置写入独立子目录 `${cloudTmpDir}/rotate` 且只清理该子目录（本地实现写在源目录内再整体改名，无此问题）；
+- **FTP `size()` 递归结果未累加**：`size("${src}/${i.name}")` 调用后丢弃返回值，子目录大小静默丢失。
+
+### K.2 健壮性（附录 I.4 遗留暴露面闭环）
+
+- **`download` 补齐与 `upload` 同级的防护**：套用 `withClientRetry`（断连重连重试一次，恢复任务同样有传输间隙）；`retrieveFileStream` 返回 null 显式判失败（原为 NPE）；`completePendingCommand` 返回值校验（传输未确认即失败，与 `storeFile` 判 false 同理）；
+- **流句柄泄漏**：`upload`/`download` 在传输失败/中断路径不关闭流，统一改为 `use {}`；`download` 的数据流先关再 `completePendingCommand`（更符合 Commons Net 的收尾顺序）。
+
+### K.3 性能
+
+- **备份循环 O(N²) 消除**（`AbstractBackupService.rotateCopies`）：`readBackupRetainCopies()` 从每应用一次改为任务级一次；副本清理从 `queryPackages(全作用域).filter` 全量扫描改为 DAO 定向查询 `query(pkg, opType, userId, cloud, backupDir)`，N 应用从 N 次全表扫描降为 N 次索引点查；同时移除未使用的 `dstDir` 参数；
+- **恢复页 Room 流重启过频**（`AppsRepo.getApps`）：`flatMapLatest` 直接监听整个 `listData`，搜索/筛选每次按键都取消重建 Room 查询流；改为先 `map` 出作用域 (cloud, backupDir) 再 `distinctUntilChanged().flatMapLatest`，仅来源切换时重建查询。
+
+### K.4 经验
+
+- **共享临时目录的删除调用点要逐个排查**：J.4 的“隔离子目录”原则不只适用于新加的写盘方法，存量的 `deleteRecursively(共享目录)` 调用同样是嫌疑点——审查时以“谁在什么时机触发、此刻目录里还有什么”为序做时序排查；
+- **一对对称 API（upload/download）修一半等于留坑**：I.4 记录了 download 的同类暴露但“按需未改”，本次审查补齐；对称接口的防护（重试/判空/结果校验/资源释放）应成对落地；
+- **`withIndex`/递归/循环里的“返回值即结果”型调用**：递归调用若返回值被丢弃，几乎总是 bug（`size()` 案例），审查时对“有返回值但未使用”的调用零容忍；
+- **Flow 组合的重启粒度**：`flatMapLatest` 的上游应先收缩到真正决定作用域的最小键集合并 `distinctUntilChanged`，否则任何无关状态（搜索词、排序）都会放大成数据源重建；Compose/Flow 场景下这是列表卡顿的常见根因。
