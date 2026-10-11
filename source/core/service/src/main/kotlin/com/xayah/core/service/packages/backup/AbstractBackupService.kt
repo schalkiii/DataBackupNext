@@ -108,6 +108,11 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
     protected open suspend fun clear() {}
     protected open suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = true
     protected open suspend fun onDeleteCopy(copy: PackageEntity): Boolean = true
+
+    /**
+     * 保存索引清单。每个应用备份成功后与任务收尾时都会调用，
+     * 实现必须保证可重复调用，且不得破坏备份过程中的暂存目录。
+     */
     protected open suspend fun onIndexManifestSaved() {}
 
     protected abstract val mPackagesBackupUtil: PackagesBackupUtil
@@ -235,6 +240,10 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                         onConfigSaved(path = configDst, archivesRelativeDir = p.archivesRelativeDir)
                         mPackageDao.upsert(restoreEntity)
                         mPackageDao.upsert(p)
+                        // 每备份完一个应用立即刷新索引清单落盘：
+                        // 云端列表同步以远端清单为准，任务中途退出时若清单仍是旧的，
+                        // 已完成的备份会被增量同步当作不存在而清除，看起来就像没备份过
+                        runCatchingOnService { onIndexManifestSaved() }
                         pkg.update(packageEntity = p)
                         mTaskEntity.update(successCount = mTaskEntity.successCount + 1)
                     } else {

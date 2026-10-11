@@ -19,6 +19,8 @@ import com.xayah.core.datastore.readFilterBackupUpdatedApps
 import com.xayah.core.datastore.readFilterRestoreInstalledApps
 import com.xayah.core.datastore.readFilterRestoreNotInstalledApps
 import com.xayah.core.datastore.readFilterRestoreUpdatedApps
+import com.xayah.core.datastore.readFilterSourceBackupDir
+import com.xayah.core.datastore.readFilterSourceCloud
 import com.xayah.core.datastore.saveFilterBackupHasBackups
 import com.xayah.core.datastore.saveFilterBackupHasNoBackups
 import com.xayah.core.datastore.saveFilterBackupLastBackupDays
@@ -26,6 +28,8 @@ import com.xayah.core.datastore.saveFilterBackupUpdatedApps
 import com.xayah.core.datastore.saveFilterRestoreInstalledApps
 import com.xayah.core.datastore.saveFilterRestoreNotInstalledApps
 import com.xayah.core.datastore.saveFilterRestoreUpdatedApps
+import com.xayah.core.datastore.saveFilterSourceBackupDir
+import com.xayah.core.datastore.saveFilterSourceCloud
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +50,7 @@ class ListDataRepo @Inject constructor(
     private val filesRepo: FilesRepo,
     private val labelsRepo: LabelsRepo,
     private val workRepo: WorkRepo,
+    private val cloudRepo: CloudRepository,
 ) {
     private lateinit var listData: Flow<ListData>
 
@@ -79,9 +84,31 @@ class ListDataRepo @Inject constructor(
     private lateinit var labelFileRefs: Flow<List<LabelFileCrossRefEntity>> // Labels filtered file refs
 
     fun initialize(target: Target, opType: OpType, cloudName: String, backupDir: String) {
+        // 解析后的实际作用域可能被来源记忆覆盖，发布 ScopeState 时以解析结果为准
+        var scopeCloudName = cloudName
+        var scopeBackupDir = backupDir
         when (target) {
             Target.Apps -> {
                 appsOpType = opType
+                // 来源（本机/云端）记忆：入口显式指定云端时以其为准并更新记忆，
+                // 默认入口恢复上次选择（记忆中的云端已被删除时回退本机）
+                runBlocking {
+                    val savedCloud = context.readFilterSourceCloud().first()
+                    val savedBackupDir = context.readFilterSourceBackupDir().first()
+                    val (resolvedCloud, resolvedBackupDir) = resolveSourceScope(
+                        cloudName = cloudName,
+                        backupDir = backupDir,
+                        savedCloud = savedCloud,
+                        savedBackupDir = savedBackupDir,
+                        isSavedCloudAlive = savedCloud.isEmpty() || cloudRepo.queryByName(savedCloud) != null,
+                    )
+                    scopeCloudName = resolvedCloud
+                    scopeBackupDir = resolvedBackupDir
+                    if (cloudName.isNotEmpty()) {
+                        context.saveFilterSourceCloud(resolvedCloud)
+                        context.saveFilterSourceBackupDir(resolvedBackupDir)
+                    }
+                }
                 selected = appsRepo.countSelectedApps(opType)
                 total = appsRepo.countApps(opType)
                 searchQuery = MutableStateFlow("")
@@ -101,8 +128,8 @@ class ListDataRepo @Inject constructor(
                 // 筛选条件持久化：进入列表时恢复上次选择（按操作类型分键读取）
                 filters = MutableStateFlow(
                     Filters(
-                        cloud = cloudName,
-                        backupDir = backupDir,
+                        cloud = scopeCloudName,
+                        backupDir = scopeBackupDir,
                         showSystemApps = runBlocking { appsRepo.getLoadSystemApps() },
                         hasBackups = runBlocking { context.readFilterBackupHasBackups().first() },
                         hasNoBackups = runBlocking { context.readFilterBackupHasNoBackups().first() },
@@ -118,10 +145,10 @@ class ListDataRepo @Inject constructor(
                 )
                 userIndex = MutableStateFlow(0)
                 userList = usersRepo.getUsers(opType)
-                userMap = usersRepo.getUsersMap(opType, cloudName, backupDir)
+                userMap = usersRepo.getUsersMap(opType, scopeCloudName, scopeBackupDir)
                 // 备份提醒角标仅统计备份页（本机版本高于备份版本）
                 outdatedCount = when (opType) {
-                    OpType.BACKUP -> appsRepo.countOutdatedBackupApps(cloudName, backupDir)
+                    OpType.BACKUP -> appsRepo.countOutdatedBackupApps(scopeCloudName, scopeBackupDir)
                     OpType.RESTORE -> flowOf(0L)
                 }
 
@@ -135,7 +162,7 @@ class ListDataRepo @Inject constructor(
                         appsRepo.getInstalledVersions(userList)
                     }
                 }
-                appList = appsRepo.getApps(opType = opType, listData = listData, pkgUserVersions = pkgUserVersions, refs = labelAppRefs, labels = labels, cloudName = cloudName, backupDir = backupDir)
+                appList = appsRepo.getApps(opType = opType, listData = listData, pkgUserVersions = pkgUserVersions, refs = labelAppRefs, labels = labels)
             }
 
             Target.Files -> {
@@ -159,7 +186,7 @@ class ListDataRepo @Inject constructor(
             }
         }
         // 作用域就绪后发布，令所有消费方进入流式订阅并可感知后续模式切换
-        scopeState.value = ScopeState(target, opType, cloudName, backupDir)
+        scopeState.value = ScopeState(target, opType, scopeCloudName, scopeBackupDir)
     }
 
     /**
@@ -212,6 +239,9 @@ class ListDataRepo @Inject constructor(
         filters.emit(block(filters.value))
         // 筛选条件持久化：按操作类型分键写入，下次进入列表时恢复
         val current = filters.value
+        // 来源（本机/云端）跨会话记忆：与操作类型无关，选择即记住
+        context.saveFilterSourceCloud(current.cloud)
+        context.saveFilterSourceBackupDir(current.backupDir)
         when (appsOpType) {
             OpType.BACKUP -> {
                 context.saveFilterBackupHasBackups(current.hasBackups)
@@ -262,6 +292,24 @@ class ListDataRepo @Inject constructor(
         val ids = labels.value.toMutableSet()
         ids.remove(label)
         labels.emit(ids)
+    }
+
+    companion object {
+        /**
+         * 来源（本机/云端）作用域解析：入口显式指定云端时以入口作用域为准，
+         * 否则恢复记忆；记忆未设置或记忆中的云端已不存在时回退入口默认（本机）。
+         */
+        fun resolveSourceScope(
+            cloudName: String,
+            backupDir: String,
+            savedCloud: String,
+            savedBackupDir: String,
+            isSavedCloudAlive: Boolean,
+        ): Pair<String, String> = when {
+            cloudName.isNotEmpty() -> cloudName to backupDir
+            savedBackupDir.isNotEmpty() && isSavedCloudAlive -> savedCloud to savedBackupDir
+            else -> cloudName to backupDir
+        }
     }
 }
 

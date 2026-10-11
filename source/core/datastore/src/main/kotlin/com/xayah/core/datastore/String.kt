@@ -19,6 +19,8 @@ val KeyThemeType = stringPreferencesKey("theme_type")
 val KeyCustomSUFile = stringPreferencesKey("custom_su_file")
 val KeyKillAppOption = stringPreferencesKey("kill_app_option")
 val KeyLanguage = stringPreferencesKey("language")
+val KeyFilterSourceCloud = stringPreferencesKey("filter_source_cloud")
+val KeyFilterSourceBackupDir = stringPreferencesKey("filter_source_backup_dir")
 
 
 // -----------------------------------------Read-----------------------------------------
@@ -30,6 +32,10 @@ fun Context.readSelectionType() = readStoreString(key = KeySelectionType, defVal
 fun Context.readThemeType() = readStoreString(key = KeyThemeType, defValue = "").map { ThemeType.of(it) }
 fun Context.readKillAppOption() = readStoreString(key = KeyKillAppOption, defValue = "").map { KillAppOption.of(it) }
 fun Context.readLanguage() = readStoreString(key = KeyLanguage, defValue = ConstantUtil.LANGUAGE_SYSTEM)
+
+// 列表页来源（本机/云端）记忆：跨会话保持上次选择，避免每次进入都重置为本机
+fun Context.readFilterSourceCloud() = readStoreString(key = KeyFilterSourceCloud, defValue = "")
+fun Context.readFilterSourceBackupDir() = readStoreString(key = KeyFilterSourceBackupDir, defValue = "")
 
 /**
  * The final path for saving the backup.
@@ -50,3 +56,5 @@ suspend fun Context.saveBackupSavePath(value: String) = saveStoreString(key = Ke
 suspend fun Context.saveCustomSUFile(value: String) = saveStoreString(key = KeyCustomSUFile, value = value.trim())
 suspend fun Context.saveKillAppOption(value: KillAppOption) = saveStoreString(key = KeyKillAppOption, value = value.name.trim())
 suspend fun Context.saveLanguage(value: String) = saveStoreString(key = KeyLanguage, value = value.trim())
+suspend fun Context.saveFilterSourceCloud(value: String) = saveStoreString(key = KeyFilterSourceCloud, value = value.trim())
+suspend fun Context.saveFilterSourceBackupDir(value: String) = saveStoreString(key = KeyFilterSourceBackupDir, value = value.trim())

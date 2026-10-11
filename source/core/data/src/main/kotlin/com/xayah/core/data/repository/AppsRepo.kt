@@ -65,9 +65,11 @@ import com.xayah.core.util.withLog
 import com.xayah.core.util.withMainContext
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -121,14 +123,13 @@ class AppsRepo @Inject constructor(
         }
     }.flowOn(defaultDispatcher)
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun getApps(
         opType: OpType,
         listData: Flow<ListData>,
         pkgUserVersions: Flow<Map<String, VersionInfo>>,
         refs: Flow<List<LabelAppCrossRefEntity>>,
         labels: Flow<Set<String>>,
-        cloudName: String,
-        backupDir: String
     ): Flow<List<App>> = combine(
         listData,
         pkgUserVersions,
@@ -136,7 +137,11 @@ class AppsRepo @Inject constructor(
         labels,
         when (opType) {
             OpType.BACKUP -> appsDao.queryPackagesFlow(opType = opType, blocked = false)
-            OpType.RESTORE -> appsDao.queryPackagesFlow(opType = opType, cloud = cloudName, backupDir = backupDir)
+            // 恢复页作用域跟随来源（本机/云端）筛选，切换来源即重建查询
+            OpType.RESTORE -> listData.flatMapLatest { lData ->
+                val filters = lData.castTo<ListData.Apps>().filters
+                appsDao.queryPackagesFlow(opType = opType, cloud = filters.cloud, backupDir = filters.backupDir)
+            }
         }
     ) { lData, pMap, lRefs, lLabels, apps ->
         val data = lData.castTo<ListData.Apps>()
@@ -741,15 +746,17 @@ class AppsRepo @Inject constructor(
 
     /**
      * 由本地 DB 重建并上传索引清单（备份收尾/全量自愈/删除保护后的维护点）。
+     * 清单写入独立临时子目录，避免清理时误删共享暂存目录中的其他内容。
      */
     private suspend fun refreshCloudIndex(client: CloudClient, entity: CloudEntity) = runCatching {
         val packages = appsDao.queryPackages(OpType.RESTORE, entity.name, entity.remote)
         val manifest = CloudIndexManifest(generatedAt = DateUtil.getTimestamp(), packages = packages)
-        val tmpDir = pathUtil.getCloudTmpDir()
-        val tmpJsonPath = "${tmpDir}/$CloudAppsIndexName"
+        val tmpIndexDir = "${pathUtil.getCloudTmpDir()}/index"
+        val tmpJsonPath = "${tmpIndexDir}/$CloudAppsIndexName"
+        rootService.mkdirs(tmpIndexDir)
         rootService.writeJson(data = manifest, dst = tmpJsonPath)
         cloudRepo.upload(client = client, src = tmpJsonPath, dstDir = pathUtil.getCloudRemoteAppsDir(entity.remote))
-        rootService.deleteRecursively(tmpDir)
+        rootService.deleteRecursively(tmpIndexDir)
     }.withLog()
 
     suspend fun calculateLocalAppSize(app: PackageEntity) {

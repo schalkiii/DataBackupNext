@@ -1394,3 +1394,35 @@ isStale    = now - status.lastBackupAt > staleThresholdDays
 - 诊断技巧：级联快速失败的共同特征是“第一个失败命令之后全部秒败”，优先怀疑共享连接已死，而非逐个命令排查；
 - 进度类回调的传输必须检查底层 API 的返回值（`storeFile` 的 false + 部分字节写入 = 静默截断），备份工具尤须以完整性优先；
 - `download` 路径存在同类暴露（恢复任务同样有传输间隙），本次按需未改，如恢复侧复现可直接套用 `withClientRetry`。
+
+## 附录 J：备份进度落盘 / 来源记忆 / 性能优化（2026-10-11）
+
+### J.1 现象
+
+- 备份中途退出后，已完成的应用在列表中仍显示为未备份，下次备份要全部重跑；
+- 统一页顶栏「机主」标签与「备份/恢复」切换按钮视觉重叠；
+- 筛选条件始终默认选中「本机」，选过「云端」也不记住；
+- 大文件备份传输速度有优化空间。
+
+### J.2 根因
+
+- **进度丢失**：本地 DB 每应用已 upsert，但云端列表同步以远端 `apps_index.json` 清单为准，而清单仅在任务收尾时生成上传；任务中断后清单陈旧，下次增量同步把已完成条目当作不存在而清除，看起来“像没备份过”；
+- **UI 重叠**：`AnimatedVisibility` 的内容是 Box 叠放布局，内部两个子项（ModeSwitch、UserTabs）未显式排布，互相覆盖；
+- **来源不记忆**：`Filters.cloud/backupDir` 初值来自导航参数（默认本机），`setFilters` 未持久化这两个字段，每次进入列表都从默认值重建；
+- **传输缓冲过小**：Commons Net `FTPClient` 数据传输缓冲默认仅 1KB，下载侧 `copyTo` 默认 8KB，大文件传输系统调用次数过多。
+
+### J.3 修复
+
+- `AbstractBackupService` 主循环每个应用成功分支后立即 `onIndexManifestSaved()`（经 `runCatchingOnService` 包裹，单应用刷新失败不影响任务继续），实现任务级断点续传语义——中断后已完成部分仍被清单承认；
+- 清单写入独立临时子目录 `${cloudTmpDir}/index` 且只清理该子目录：`onIndexManifestSaved` 每应用触发，不能沿用收尾时“删整个暂存目录”的清理逻辑，否则会误删等待上传的归档（`AppsRepo.refreshCloudIndex` 同步适配）；
+- `ListTopBar` 中 `AnimatedVisibility` 内容显式套 `Column` 排布；
+- `ListDataRepo` 新增来源记忆（DataStore 键 `filter_source_cloud` / `filter_source_backup_dir`）：入口显式指定云端时以其为准并更新记忆，默认入口恢复上次选择；抽出纯函数 `resolveSourceScope` 处理边界（记忆中云端已被删除时回退本机）；`AppsRepo.getApps` 的 RESTORE 分支改用 `flatMapLatest` 监听 `filters.cloud/backupDir`，切换来源即重建查询；
+- `FTPClientImpl` 传输缓冲放大至 256KB（`client.bufferSize` + 下载侧 `copyTo` 显式 bufferSize）。
+
+### J.4 经验
+
+- **“增量同步 + 事后清单”组合的进度语义**：当列表状态由远端清单派生时，本地 DB 落盘不等于用户可见的进度落盘；清单刷新时机必须与状态变更时机对齐到同一粒度（每应用），否则中断即回退；
+- **高频刷新共享临时目录的隔离原则**：一个被多次调用的写盘方法不能沿用“一次性任务收尾”的清理逻辑；写入独立子目录并只清子目录，是保持可重入（幂等可重复调用）的最低成本做法；
+- **Compose `AnimatedVisibility` 多子项必须显式排布**：其内容默认 Box 叠放，两个以上子项需套 `Column`/`Row`，否则出现互相覆盖的“重叠”视觉；
+- **跨会话筛选状态三类持久化时机**：显式入口参数 > 用户上次选择 > 系统默认，且记忆对象失效（云端账号已删除）时必须静默回退默认，不能抛错或卡住；
+- **FTP 大文件吞吐**：库默认 1KB 传输缓冲是隐形瓶颈，上传（`FTPClient.bufferSize`）与下载（`copyTo` bufferSize）两侧都要放大到同量级。

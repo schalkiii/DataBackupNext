@@ -174,13 +174,17 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
     }.isSuccess
 
     override suspend fun onIndexManifestSaved() {
-        // 上传统计当前作用域全部 RESTORE 实体的索引清单，供增量同步使用
+        // 上传统计当前作用域全部 RESTORE 实体的索引清单，供增量同步使用。
+        // 本方法每备份完一个应用就会调用，清单写入独立临时子目录并只清理该子目录，
+        // 不能动整个暂存目录——归档文件还在里面等待上传
         val packages = mPackageDao.queryPackages(OpType.RESTORE, mTaskEntity.cloud, mTaskEntity.backupDir)
         val manifest = CloudIndexManifest(generatedAt = DateUtil.getTimestamp(), packages = packages)
-        val tmpJsonPath = "${mPathUtil.getCloudTmpDir()}/$CloudAppsIndexName"
+        val tmpIndexDir = "${mPathUtil.getCloudTmpDir()}/index"
+        val tmpJsonPath = "${tmpIndexDir}/$CloudAppsIndexName"
+        mRootService.mkdirs(tmpIndexDir)
         mRootService.writeJson(data = manifest, dst = tmpJsonPath)
         mCloudRepo.upload(client = mClient, src = tmpJsonPath, dstDir = mRemoteAppsDir)
-        mRootService.deleteRecursively(mPathUtil.getCloudTmpDir())
+        mRootService.deleteRecursively(tmpIndexDir)
     }
 
     override suspend fun clear() {

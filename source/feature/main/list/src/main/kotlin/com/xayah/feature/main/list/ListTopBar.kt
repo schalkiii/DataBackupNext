@@ -120,9 +120,12 @@ internal fun ListTopBar(
 
         AnimatedVisibility(visible = uiState is ListTopBarUiState.Success.Apps) {
             val state = uiState.castTo<ListTopBarUiState.Success.Apps>()
-            // 统一页模式切换：备份 ↔ 恢复
-            ModeSwitch(opType = state.opType, onSwitch = viewModel::switchMode)
-            UserTabs(selected = state.userIndex, userList = state.userList, usersMap = state.userMap, onTabClick = viewModel::setUser)
+            // AnimatedVisibility 的内容是叠放布局，多个子项必须显式排布，否则模式切换与用户标签互相覆盖
+            Column {
+                // 统一页模式切换：备份 ↔ 恢复
+                ModeSwitch(opType = state.opType, onSwitch = viewModel::switchMode)
+                UserTabs(selected = state.userIndex, userList = state.userList, usersMap = state.userMap, onTabClick = viewModel::setUser)
+            }
         }
 
         AnimatedVisibility(visible = uiState !is ListTopBarUiState.Success.Apps) {

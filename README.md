@@ -62,7 +62,9 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :date: **Sort by last backup time** — new sort option (ascending/descending) driven by a derived backup ledger aggregated from existing RESTORE entities, without an extra database table.
 
-* :satellite: **Incremental cloud list sync** — a manifest (`apps_index.json`) is uploaded at the end of every cloud backup; loading the backed-up list downloads this single file instead of walking the whole remote tree, with graceful fallback to the legacy full scan. Archive sizes are preset from the manifest, so restore details no longer show 0 B.
+* :satellite: **Incremental cloud list sync** — a manifest (`apps_index.json`) is refreshed after every completed app and uploaded to the remote; loading the backed-up list downloads this single file instead of walking the whole remote tree, with graceful fallback to the legacy full scan. Archive sizes are preset from the manifest, so restore details no longer show 0 B.
+
+* :white_check_mark: **Per-app backup progress persistence** — each finished app is committed to the index manifest immediately, so an interrupted backup keeps its progress: already backed-up apps stay backed up instead of being wiped by the next incremental sync and re-backed-up from scratch.
 
 * :package: **Multiple backup copies** — configurable retention count (default 1, backward compatible); before each backup the current main copy is rotated to a timestamped copy and copies beyond the limit are cleaned up, log-rotation style.
 
@@ -74,6 +76,8 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :floppy_disk: **Persistent filter conditions** — list filter states (backup view and restore view separately) are persisted in DataStore and restored on the next visit.
 
+* :cloud: **Remembered backup source** — the local/cloud source and backup directory picked in the source picker are remembered across sessions and restored on the next visit (falling back to local if the remembered cloud account has been removed).
+
 * :arrow_right: **Inline version transition badge** — next to the update icon, the list item shows the version transition in a compact form (`1.0 → 1.2`): local → backup on the backup view, cloud → local on the restore view.
 
 * :arrows_counterclockwise: **Unified backup/restore page** — backup and restore share one list with a top segmented switch; filter once, then act on the whole selection (backup, restore, delete backup, or root-uninstall non-system apps).
@@ -82,7 +86,7 @@ This repository is a fork of [XayahSuSuSu/Android-DataBackup](https://github.com
 
 * :alarm_clock: **Stale backup filter** — new filter "last backup older than N days" (default 30, adjustable, persisted) surfaces apps whose backup has gone stale.
 
-See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D, F-I) and the future roadmap (appendix E).
+See [docs/backup-enhancement-proposal.md](./docs/backup-enhancement-proposal.md) for the full design, implementation records (appendices A-D, F-J) and the future roadmap (appendix E).
 
 ## Screenshot
 <div align="center">

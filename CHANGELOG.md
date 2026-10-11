@@ -19,10 +19,14 @@
 * **apps:** Batch operations now include delete backup and uninstall (root) for the selected apps on the unified page
 * **apps:** New filter "last backup older than N days" (default 30, adjustable, persisted) to surface apps whose backup is stale
 * **apps:** App details on the backup view now show the last backup time taken from the latest backup archive
+* **apps:** Remember the backup source (local/cloud and backup directory) across sessions — reopening the list restores the last used source instead of always defaulting to local, falling back to local when the remembered cloud account no longer exists
 
 
 ### Bug Fixes
 
+* **backup:** Persist backup progress after every completed app — the cloud index manifest is refreshed per app instead of only at task completion, so an interrupted task keeps its finished backups instead of having them wiped by the next incremental sync (they looked "never backed up")
+* **backup:** The per-app manifest refresh writes into an isolated temp subdirectory and cleans up only that subdirectory, so the shared staging directory holding not-yet-uploaded archives is never deleted
+* **apps:** Fix the owner (user) tabs overlapping the backup/restore switch in the list top bar — `AnimatedVisibility` stacks its children, they are now laid out in an explicit column
 * **cloud:** Keep the FTP control connection alive during long transfers and recover from mid-task disconnects — after a dropped connection (Broken pipe / connection abort) the client now reconnects, restores the working directory and retries the command once, instead of failing every remaining upload fast
 * **cloud:** FTP uploads now check the transfer result — an aborted transfer (e.g. 426) with partial bytes written is reported as an error instead of silently marking a truncated archive as success
 * **apps:** Fix crash when entering the backup/restore list — `onResume` force-cast the still-`Loading` uiState to `Success` (ClassCastException) before the first emission; the refresh is now skipped until the state is ready
@@ -33,11 +37,17 @@
 * **backup:** Abort the remaining backups immediately with a clear notification when a fatal storage error (No space left / Broken pipe) is detected, instead of failing every remaining app in rapid succession
 
 
+### Performance
+
+* **cloud:** Enlarge the FTP data transfer buffer from the library default 1KB to 256KB on both upload and download — fewer syscalls and higher throughput on large archives
+
+
 ### Test
 
 * Add unit tests for backup status aggregation, cloud index manifest serialization and package predicates (20 cases)
 * Add unit tests for backup index baseline aggregation on backup/restore scenarios (4 cases)
 * Add unit tests for version transition formatting and copy selection (5 cases: 4 for version transitions, 1 for same-key copy filtering and ordering)
+* Add unit tests for backup source scope resolution (5 cases: default without memory, restore last cloud, restore last local, remembered cloud deleted, explicit entry takes precedence)
 * Add unit tests for the "last backup older than N days" predicate (5 cases covering disabled value, never-backed-up, missing index and day-threshold boundary)
 
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)

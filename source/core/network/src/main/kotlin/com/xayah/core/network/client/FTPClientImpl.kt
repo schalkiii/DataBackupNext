@@ -29,6 +29,10 @@ import java.io.OutputStream
 import javax.security.auth.login.LoginException
 
 class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra) : CloudClient {
+    companion object {
+        private const val TRANSFER_BUFFER_SIZE = 256 * 1024
+    }
+
     private var client: FTPClient? = null
 
     private fun log(msg: () -> String): String = run {
@@ -71,6 +75,8 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
             autodetectUTF8 = true
             // 大文件传输期间控制连接长时间无命令，周期发送 NOOP 保活，避免被服务端/网络设备按空闲超时断开
             controlKeepAliveTimeout = 30L
+            // 数据传输缓冲，库默认仅 1KB，放大以减少系统调用次数、提升大文件传输吞吐
+            bufferSize = TRANSFER_BUFFER_SIZE
             connect(entity.host, extra.port)
             if (login(entity.user, entity.pass).not()) throw LoginException("Failed to login, user: ${entity.user}, pass: ${entity.pass}.")
             enterLocalPassiveMode()
@@ -138,7 +144,8 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         val srcInputStream: InputStream = client.retrieveFileStream(src)
         val dstOutPutStream: OutputStream = dstFile.outputStream()
         val countingStream = CountingOutputStreamImpl(dstOutPutStream, -1) { written, total -> onDownloading(written, total) }
-        srcInputStream.copyTo(countingStream)
+        // 与传输缓冲同量级，避免下载侧回落到 8KB 默认缓冲
+        srcInputStream.copyTo(countingStream, bufferSize = TRANSFER_BUFFER_SIZE)
         client.completePendingCommand()
         srcInputStream.close()
         dstOutPutStream.close()
