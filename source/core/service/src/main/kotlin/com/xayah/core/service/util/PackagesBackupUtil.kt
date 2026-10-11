@@ -15,6 +15,7 @@ import com.xayah.core.model.OperationState
 import com.xayah.core.model.SelectionType
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
+import com.xayah.core.model.util.get
 import com.xayah.core.model.util.getCompressPara
 import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.service.RemoteRootService
@@ -26,12 +27,8 @@ import com.xayah.core.util.command.Tar
 import com.xayah.core.util.filesDir
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.coroutines.coroutineContext
 
 class PackagesBackupUtil @Inject constructor(
     @ApplicationContext val context: Context,
@@ -107,12 +104,23 @@ class PackagesBackupUtil @Inject constructor(
         else -> Unit
     }
 
+    private fun PackageEntity.getDisplayBytes(dataType: DataType) = when (dataType) {
+        DataType.PACKAGE_APK -> displayStats.apkBytes
+        DataType.PACKAGE_USER -> displayStats.userBytes
+        DataType.PACKAGE_USER_DE -> displayStats.userDeBytes
+        DataType.PACKAGE_DATA -> displayStats.dataBytes
+        DataType.PACKAGE_OBB -> displayStats.obbBytes
+        DataType.PACKAGE_MEDIA -> displayStats.mediaBytes
+        else -> 0
+    }
+
     private suspend fun TaskDetailPackageEntity.updateInfo(
         dataType: DataType,
         state: OperationState? = null,
         bytes: Long? = null,
         log: String? = null,
         content: String? = null,
+        progress: Float? = null,
     ) = run {
         when (dataType) {
             DataType.PACKAGE_APK -> {
@@ -121,6 +129,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -130,6 +139,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -139,6 +149,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -148,6 +159,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -157,6 +169,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -166,6 +179,7 @@ class PackagesBackupUtil @Inject constructor(
                     if (bytes != null) it.bytes = bytes
                     if (log != null) it.log = log
                     if (content != null) it.content = content
+                    if (progress != null) it.progress = progress
                 }
             }
 
@@ -218,7 +232,11 @@ class PackagesBackupUtil @Inject constructor(
         if (list.isNotEmpty()) PathUtil.getParentPath(list[0]) else ""
     }
 
-    suspend fun backupApk(p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String): ShellResult = run {
+    /**
+     * [compressProgressCap] 压缩阶段在该数据项进度中的上限：
+     * 压缩完成后还需上传时应小于 1，为上传阶段留出区间。
+     */
+    suspend fun backupApk(p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String, compressProgressCap: Float = 0.5f): ShellResult = run {
         log { "Backing up apk..." }
 
         val dataType = DataType.PACKAGE_APK
@@ -242,11 +260,19 @@ class PackagesBackupUtil @Inject constructor(
                     t.updateInfo(dataType = dataType, state = OperationState.SKIP)
                     out.add(log { "Data has not changed." })
                 } else {
-                    Tar.compressInCur(cur = srcDir, src = "./*.apk", dst = dst, extra = ct.getCompressPara(context.readCompressionLevel().first()))
-                        .also { result ->
-                            isSuccess = result.isSuccess
-                            out.addAll(result.out)
-                        }
+                    // 压缩期间按归档增长估算进度并持续上报，长压缩不再长时间无反馈
+                    val reporter = TransferProgress(cap = compressProgressCap)
+                    val ratio = estimateArchiveRatio(displayBytes = r?.getDisplayBytes(dataType) ?: 0, dataBytes = r?.getDataBytes(dataType) ?: 0)
+                    withProgressTicker(onTick = {
+                        val archiveBytes = rootService.calculateSize(dst)
+                        reporter.report(if (sizeBytes > 0) archiveBytes.toFloat() / (sizeBytes * ratio) else 0f)
+                        t.updateInfo(dataType = dataType, content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+                    }) {
+                        Tar.compressInCur(cur = srcDir, src = "./*.apk", dst = dst, extra = ct.getCompressPara(context.readCompressionLevel().first()))
+                    }.also { result ->
+                        isSuccess = result.isSuccess
+                        out.addAll(result.out)
+                    }
                     commonBackupUtil.testArchive(src = dst, ct = ct).also { result ->
                         isSuccess = isSuccess && result.isSuccess
                         out.addAll(result.out)
@@ -269,7 +295,7 @@ class PackagesBackupUtil @Inject constructor(
     /**
      * Package data: USER, USER_DE, DATA, OBB, MEDIA
      */
-    suspend fun backupData(p: PackageEntity, t: TaskDetailPackageEntity, r: PackageEntity?, dataType: DataType, dstDir: String): ShellResult = run {
+    suspend fun backupData(p: PackageEntity, t: TaskDetailPackageEntity, r: PackageEntity?, dataType: DataType, dstDir: String, compressProgressCap: Float = 0.5f): ShellResult = run {
         log { "Backing up ${dataType.type}..." }
 
         val packageName = p.packageName
@@ -329,15 +355,23 @@ class PackagesBackupUtil @Inject constructor(
                 t.updateInfo(dataType = dataType, state = OperationState.SKIP)
                 out.add(log { "Data has not changed." })
             } else {
-                // Compress and test.
-                Tar.compress(
-                    exclusionList = exclusionList,
-                    h = if (context.readFollowSymlinks().first()) "-h" else "",
-                    srcDir = srcDir,
-                    src = packageName,
-                    dst = dst,
-                    extra = ct.getCompressPara(context.readCompressionLevel().first())
-                ).also { result ->
+                // 压缩期间按归档增长估算进度并持续上报，长压缩不再长时间无反馈
+                val reporter = TransferProgress(cap = compressProgressCap)
+                val ratio = estimateArchiveRatio(displayBytes = r?.getDisplayBytes(dataType) ?: 0, dataBytes = r?.getDataBytes(dataType) ?: 0)
+                withProgressTicker(onTick = {
+                    val archiveBytes = rootService.calculateSize(dst)
+                    reporter.report(if (sizeBytes > 0) archiveBytes.toFloat() / (sizeBytes * ratio) else 0f)
+                    t.updateInfo(dataType = dataType, content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+                }) {
+                    Tar.compress(
+                        exclusionList = exclusionList,
+                        h = if (context.readFollowSymlinks().first()) "-h" else "",
+                        srcDir = srcDir,
+                        src = packageName,
+                        dst = dst,
+                        extra = ct.getCompressPara(context.readCompressionLevel().first())
+                    )
+                }.also { result ->
                     isSuccess = result.isSuccess
                     out.addAll(result.out)
                 }
@@ -391,20 +425,14 @@ class PackagesBackupUtil @Inject constructor(
         val src = packageRepository.getArchiveDst(dstDir = srcDir, dataType = dataType, ct = ct)
         t.updateInfo(dataType = dataType, state = OperationState.UPLOADING)
 
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    t.updateInfo(dataType = dataType, content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        // 上传进度从压缩阶段的存量值续走，断线重传计数归零时取最大值兜底，百分比不回跳；
+        // 收尾写入在轮询停止后进行，避免过期轮询把 100% 覆盖回旧值
+        val reporter = TransferProgress(base = t.get(dataType).progress.coerceIn(0f, 1f))
+        val result = withProgressTicker(onTick = {
+            t.updateInfo(dataType = dataType, content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            cloudRepository.upload(client = client, src = src, dstDir = dstDir, onUploading = { read, total -> reporter.report(read, total) })
         }
-
-        cloudRepository.upload(client = client, src = src, dstDir = dstDir, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            flag = false
-            t.updateInfo(dataType = dataType, state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = t.getLog(dataType) + "\n${outString}", content = "100%")
-        }
+        t.updateInfo(dataType = dataType, state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = t.getLog(dataType) + "\n${result.outString}", content = "100%")
     }
 }

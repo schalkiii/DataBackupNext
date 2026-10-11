@@ -10,21 +10,16 @@ class CountingInputStreamImpl(
     private val fileSize: Long,
     inline val onProgress: (read: Long, total: Long) -> Unit
 ) : CountingInputStream(`in`) {
-    private var totalRead: Long = 0
+    // 取父类实际读取字节数上报：按请求长度自累计会在末尾多计一整块，进度会虚高/乱跳
     private val timer = Timer()
     private val task = object : TimerTask() {
         override fun run() {
-            onProgress(totalRead, fileSize)
+            onProgress(byteCount, fileSize)
         }
     }
 
     init {
         timer.schedule(task, 0, 1000)
-    }
-
-    override fun beforeRead(n: Int) {
-        super.beforeRead(n)
-        totalRead += n
     }
 
     override fun close() {

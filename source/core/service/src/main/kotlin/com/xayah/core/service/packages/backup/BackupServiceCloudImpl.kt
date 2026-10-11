@@ -20,15 +20,13 @@ import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.PackagesBackupUtil
+import com.xayah.core.service.util.TransferProgress
+import com.xayah.core.service.util.withProgressTicker
 import com.xayah.core.util.CloudAppsIndexName
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.PathUtil
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.coroutines.coroutineContext
 
 @AndroidEntryPoint
 internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupService() {
@@ -86,10 +84,11 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
 
     override suspend fun backup(type: DataType, p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String) {
         val remoteAppDir = getRemoteAppDir(p.archivesRelativeDir)
+        // 云端备份压缩后还需上传：压缩占前半程进度，上传续走后半程
         val result = if (type == DataType.PACKAGE_APK) {
-            mPackagesBackupUtil.backupApk(p = p, t = t, r = r, dstDir = dstDir)
+            mPackagesBackupUtil.backupApk(p = p, t = t, r = r, dstDir = dstDir, compressProgressCap = 0.5f)
         } else {
-            mPackagesBackupUtil.backupData(p = p, t = t, r = r, dataType = type, dstDir = dstDir)
+            mPackagesBackupUtil.backupData(p = p, t = t, r = r, dataType = type, dstDir = dstDir, compressProgressCap = 0.5f)
         }
         if (result.isSuccess && t.get(type).state != OperationState.SKIP) {
             mPackagesBackupUtil.upload(client = mClient, p = p, t = t, dataType = type, srcDir = dstDir, dstDir = remoteAppDir)
@@ -104,56 +103,35 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
 
     override suspend fun onItselfSaved(path: String, entity: ProcessingInfoEntity) {
         entity.update(state = OperationState.UPLOADING)
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    entity.update(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        val reporter = TransferProgress()
+        val result = withProgressTicker(onTick = {
+            entity.update(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            mCloudRepo.upload(client = mClient, src = path, dstDir = mRemotePath, onUploading = { read, total -> reporter.report(read, total) })
         }
-        mCloudRepo.upload(client = mClient, src = path, dstDir = mRemotePath, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
-        }
-        flag = false
+        entity.update(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = if (result.isSuccess) null else result.outString, content = "100%")
     }
 
     override suspend fun onIconsSaved(path: String, entity: ProcessingInfoEntity) {
         entity.update(state = OperationState.UPLOADING)
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    entity.update(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        val reporter = TransferProgress()
+        val result = withProgressTicker(onTick = {
+            entity.update(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> reporter.report(read, total) })
         }
-        mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
-        }
-        flag = false
+        entity.update(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = if (result.isSuccess) null else result.outString, content = "100%")
     }
 
     override suspend fun onConfigsSaved(path: String, entity: ProcessingInfoEntity) {
         entity.update(state = OperationState.UPLOADING)
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    entity.update(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        val reporter = TransferProgress()
+        val result = withProgressTicker(onTick = {
+            entity.update(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> reporter.report(read, total) })
         }
-        mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
-        }
-        flag = false
+        entity.update(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = if (result.isSuccess) null else result.outString, content = "100%")
     }
 
     override suspend fun onRotateCopy(src: PackageEntity, dst: PackageEntity): Boolean = runCatching {

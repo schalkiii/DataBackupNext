@@ -38,6 +38,9 @@
 * **backup:** Recover from a broken shell session instead of failing every subsequent command — on an execution exception (e.g. Broken pipe) the default shell is rebuilt and the command retried once
 * **backup:** Raise the root shell verification timeout from 3s to the library default 20s — the short timeout force-closed the shell when su started slowly, cascading into fast failures for all remaining backups
 * **backup:** Abort the remaining backups immediately with a clear notification when a fatal storage error (No space left / Broken pipe) is detected, instead of failing every remaining app in rapid succession
+* **backup:** Backup progress no longer jumps backwards (e.g. 0% → 9% → 0% → 10%) — progress is monotonic (a `TransferProgress` guard keeps the historical max so a mid-transfer retry that resets the byte counter can't roll the percentage back), the stale polling coroutine is stopped before the final 100% is written so it can't overwrite the finishing value, and the counting streams report Commons IO's native byte count instead of over-counting by a final chunk
+* **backup:** Compressing large user data now reports live progress (driven by the archive's growth) instead of spinning with no feedback until the archive finishes; cloud backups split the item into compress 0–50% then upload 50–100%, local backups run compression across the full 0–100%
+* **backup:** Pre/post-processing progress average no longer dips into negative/jumpy values — uninitialized items (`progress = -1`) are clamped into `[0,1]` before averaging
 
 
 ### Performance
@@ -56,7 +59,8 @@
 * Add unit tests for the "last backup older than N days" predicate (5 cases covering disabled value, never-backed-up, missing index and day-threshold boundary)
 * Add unit tests for cloud index incremental sync (7 cases: reuse row id and keep selection, per-user/copy keys, empty manifest clears local rows, fallback to full scan when the manifest is missing or the download fails, schema version gate, null packages gate)
 * Add unit tests for multi-copy retention pruning (4 cases) and counting input/output streams (3 cases)
-* Complete the unit test coverage matrix across `core/model`, `core/data`, `core/service` and `core/network` — 58 JVM cases in total, all green (see the coverage matrix in `docs/backup-enhancement-proposal.md`)
+* Add unit tests for monotonic transfer progress and the polling ticker (7 cases: interval mapping, no-rollback on retry, overflow clamping, compress-baseline start, archive-ratio estimation, ticker error tolerance, ticker shutdown on finish)
+* Complete the unit test coverage matrix across `core/model`, `core/data`, `core/service` and `core/network` — 65 JVM cases in total, all green (see the coverage matrix in `docs/backup-enhancement-proposal.md`)
 * Extract `AppsRepo.syncCloudIndex` and `AbstractBackupService.selectCopiesToPrune` as testable pure seams so manifest sync and retention semantics are covered without mocking `RemoteRootService` (behavior unchanged)
 
 ## [2.0.12](https://github.com/XayahSuSuSu/Android-DataBackup/compare/2.0.11...v2.0.12) (2025-09-20)

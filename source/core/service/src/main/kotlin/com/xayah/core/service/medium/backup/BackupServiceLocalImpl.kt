@@ -49,7 +49,8 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun backup(m: MediaEntity, r: MediaEntity?, t: TaskDetailMediaEntity, dstDir: String) {
-        mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir)
+        // 本地备份无上传阶段，压缩即数据项全程，进度区间为 0..1
+        mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir, compressProgressCap = 1f)
         t.update(progress = 1f)
         t.update(processingIndex = t.processingIndex + 1)
     }

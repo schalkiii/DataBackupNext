@@ -19,12 +19,8 @@ import com.xayah.core.util.PathUtil
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.coroutines.coroutineContext
 
 class MediumBackupUtil @Inject constructor(
     @ApplicationContext val context: Context,
@@ -48,6 +44,7 @@ class MediumBackupUtil @Inject constructor(
 
     private fun MediaEntity.setDataBytes(sizeBytes: Long) = run { mediaInfo.dataBytes = sizeBytes }
     private fun MediaEntity.setDisplayBytes(sizeBytes: Long) = run { mediaInfo.displayBytes = sizeBytes }
+    private fun MediaEntity.getDisplayBytes() = mediaInfo.displayBytes
 
     private fun TaskDetailMediaEntity.getLog() = mediaInfo.log
 
@@ -56,17 +53,23 @@ class MediumBackupUtil @Inject constructor(
         bytes: Long? = null,
         log: String? = null,
         content: String? = null,
+        progress: Float? = null,
     ) = run {
         mediaInfo.also {
             if (state != null) it.state = state
             if (bytes != null) it.bytes = bytes
             if (log != null) it.log = log
             if (content != null) it.content = content
+            if (progress != null) it.progress = progress
         }
         taskDao.upsert(this)
     }
 
-    suspend fun backupMedia(m: MediaEntity, t: TaskDetailMediaEntity, r: MediaEntity?, dstDir: String): ShellResult = run {
+    /**
+     * [compressProgressCap] 压缩阶段在该数据项进度中的上限：
+     * 压缩完成后还需上传时应小于 1，为上传阶段留出区间。
+     */
+    suspend fun backupMedia(m: MediaEntity, t: TaskDetailMediaEntity, r: MediaEntity?, dstDir: String, compressProgressCap: Float = 0.5f): ShellResult = run {
         log { "Backing up ${DataType.MEDIA_MEDIA.type}..." }
 
         val name = m.name
@@ -93,15 +96,23 @@ class MediumBackupUtil @Inject constructor(
             t.updateInfo(state = OperationState.SKIP)
             out.add(log { "Data has not changed." })
         } else {
-            // Compress and test.
-            Tar.compress(
-                exclusionList = listOf(),
-                h = if (context.readFollowSymlinks().first()) "-h" else "",
-                srcDir = srcDir,
-                src = PathUtil.getFileName(src),// the name is not always the actual file name of the source,but the src does contain
-                dst = dst,
-                extra = ct.getCompressPara(context.readCompressionLevel().first())
-            ).also { result ->
+            // 压缩期间按归档增长估算进度并持续上报，长压缩不再长时间无反馈
+            val reporter = TransferProgress(cap = compressProgressCap)
+            val ratio = estimateArchiveRatio(displayBytes = r?.getDisplayBytes() ?: 0, dataBytes = r?.getDataBytes() ?: 0)
+            withProgressTicker(onTick = {
+                val archiveBytes = rootService.calculateSize(dst)
+                reporter.report(if (sizeBytes > 0) archiveBytes.toFloat() / (sizeBytes * ratio) else 0f)
+                t.updateInfo(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+            }) {
+                Tar.compress(
+                    exclusionList = listOf(),
+                    h = if (context.readFollowSymlinks().first()) "-h" else "",
+                    srcDir = srcDir,
+                    src = PathUtil.getFileName(src),// the name is not always the actual file name of the source,but the src does contain
+                    dst = dst,
+                    extra = ct.getCompressPara(context.readCompressionLevel().first())
+                )
+            }.also { result ->
                 isSuccess = result.isSuccess
                 out.addAll(result.out)
             }
@@ -125,20 +136,14 @@ class MediumBackupUtil @Inject constructor(
         val src = mediaRepository.getArchiveDst(dstDir = srcDir, ct = ct)
         t.updateInfo(state = OperationState.UPLOADING)
 
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    t.updateInfo(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        // 上传进度从压缩阶段的存量值续走，断线重传计数归零时取最大值兜底，百分比不回跳；
+        // 收尾写入在轮询停止后进行，避免过期轮询把 100% 覆盖回旧值
+        val reporter = TransferProgress(base = t.mediaInfo.progress.coerceIn(0f, 1f))
+        val result = withProgressTicker(onTick = {
+            t.updateInfo(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            cloudRepository.upload(client = client, src = src, dstDir = dstDir, onUploading = { read, total -> reporter.report(read, total) })
         }
-
-        cloudRepository.upload(client = client, src = src, dstDir = dstDir, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            flag = false
-            t.updateInfo(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = t.getLog() + "\n${outString}", content = "100%")
-        }
+        t.updateInfo(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = t.getLog() + "\n${result.outString}", content = "100%")
     }
 }

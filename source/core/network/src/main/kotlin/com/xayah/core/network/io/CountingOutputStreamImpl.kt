@@ -10,21 +10,16 @@ class CountingOutputStreamImpl(
     private val fileSize: Long,
     inline val onProgress: (written: Long, total: Long) -> Unit
 ) : CountingOutputStream(`out`) {
-    private var totalWrite: Long = 0
+    // 取父类实际写入字节数上报：按请求长度自累计会在末尾多计一整块，进度会虚高/乱跳
     private val timer = Timer()
     private val task = object : TimerTask() {
         override fun run() {
-            onProgress(totalWrite, fileSize)
+            onProgress(byteCount, fileSize)
         }
     }
 
     init {
         timer.schedule(task, 0, 1000)
-    }
-
-    override fun beforeWrite(n: Int) {
-        super.beforeWrite(n)
-        totalWrite += n
     }
 
     override fun close() {

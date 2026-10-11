@@ -1477,9 +1477,10 @@ H.5 方案复用补充（2026-10-11 二次重建实测）：
 | core/data | `AppsRepoGetAppsFlowTest` | 恢复页流重建粒度、关键词大小写、选中置顶 | 3 |
 | core/data | `ListDataRepoSourceScopeTest` | 来源记忆解析与失效回退 | 5 |
 | core/service | `SelectCopiesToPruneTest` | 多副本保留策略边界 | 4 |
+| core/service | `TransferProgressTest` | 进度单调（区间映射/重传不回跳/越界钳制）、归档比估算、轮询收尾停机 | 7 |
 | core/network | `CountingStreamsTest` | 计数输入/输出流与进度回调 | 3 |
 
-合计 58 例，`./gradlew :core:model:testDebugUnitTest :core:data:testDebugUnitTest :core:service:testDebugUnitTest :core:network:testDebugUnitTest` 全绿。
+合计 65 例，`./gradlew :core:model:testDebugUnitTest :core:data:testDebugUnitTest :core:service:testDebugUnitTest :core:network:testDebugUnitTest` 全绿。
 
 ### L.1 可测性重构（为测试让路的最小生产改动）
 
@@ -1491,3 +1492,50 @@ H.5 方案复用补充（2026-10-11 二次重建实测）：
 - **mockk 无法插桩 `RemoteRootService` 的 suspend 方法**：`coEvery` 录制期真实方法体被执行（表现为 `Missing mocked calls` / `left matchers` / 懒加载字段 NPE），spyk 与普通 mockk、常量参数与 `any()` 均稳定复现；而接口 suspend、其他 final 类 suspend、同类的非 suspend getter 都正常。规避原则：业务语义抽纯函数，I/O 依赖优先选接口（`PackageDao`/`CloudClient`）做 mock，`RemoteRootService` 只作 relaxed 占位且保证用例路径不触发其 suspend 方法；
 - **依赖 Android/懒加载的工具类用真实实例**：`by lazy` 字段（如 `gsonUtil`）mock getter 不可靠，改用真实 `GsonUtil()`/`spyk` 保留真实行为；
 - **互补筛选对的测试参数必须与生产一致**：`hasBackups/hasNoBackups`、`installedApps/notInstalledApps` 生产默认全 true（双选=显示全部），测试若传 false 会得到互斥过滤后的空列表，误判为实现缺陷。
+
+## 附录 M：备份进度体验修复 — 长转圈 / 百分比回跳（2026-10-11）
+
+用户实测反馈：备份 user data 时「转圈很久才开始有进度条」，且「进度百分比来回跳动（0% → 9% → 0% → 10% …）」。逐条定位根因并修复。
+
+### M.1 根因
+
+1. **长阶段无进度反馈**：`calculateSize` + `Tar.compress` 期间没有任何进度写入，压缩大目录耗时数分钟，界面只转圈不动。
+2. **百分比回跳**（三处叠加）：
+   - 计数流按「请求长度」自累计，末尾会多计一整块，`read` 虚高甚至超过 `total`，比例越界后归零重来；
+   - 上传收尾时轮询协程仍在跑，过期的百分比把已写入的 100% 覆盖回旧值；
+   - 断线重传让底层字节计数从零重来，直接上报造成进度倒退；
+3. **均值被未初始化值拉低**：pre/post 处理项 `ProcessingInfoEntity.progress` 默认 `-1`，`sumOf { progress } / size` 把 `-1` 计入，均值出现负数/乱跳。
+
+### M.2 修复
+
+- **单调进度**（`core/service/.../util/TransferProgress.kt`，新增）：进度只增不减，本阶段按 `[base, cap]` 区间换算，断线重传以历史最大值兜底；`base` 取压缩阶段存量值，压缩→上传全程连续递增。
+- **轮询收尾安全**（`withProgressTicker`）：返回前先取消并 `join` 轮询协程，保证收尾写入（100%）在轮询停止后执行；轮询里的上报异常被吞掉，不影响备份本身。
+- **压缩期进度反馈**：压缩期间按「归档文件大小 /（源大小 × 归档比）」增长率持续上报，长压缩不再无反馈；云端压缩占前半程 `0..0.5`、上传续走 `0.5..1`，本地备份无上传、压缩全程 `0..1`。
+- **计数流改用原生字节计数**：`CountingInputStreamImpl`/`CountingOutputStreamImpl` 取 Commons IO 父类 `byteCount` 上报，消除手动按请求长度累计的末尾虚高。
+- **UI 均值修正**：`AbstractProcessingViewModel.averageProgress` 把各项进度收敛到 `[0,1]` 后取平均（未开始的 `-1` 按 0 计入），均值单调且不越界。
+
+### M.3 踩坑
+
+- **轮询协程与收尾写入的竞争**：若不在返回前停掉轮询，最后一次 `onTick` 可能在 `updateInfo(…, 1f)` 之后落地旧百分比，肉眼即「快到 100% 又掉回去」。`withProgressTicker` 的 `finally { cancel(); join() }` 是关键。
+- **估算归档比仅用于驱动进度条**：`estimateArchiveRatio` 优先取上次备份的「归档/源」实际值，无参考时按 0.5 估，钳制在 `[0.05, 1]`，绝不影响备份结果，只影响进度观感。
+- **单调性必须在写入侧兜底**：即便底层计数偶发回退，`TransferProgress.report` 只在更大时更新，从源头保证界面百分比不倒退。
+
+### M.4 验证
+
+- 新增 `core/service` `TransferProgressTest` 7 例（区间映射、重传不回跳、越界钳制、存量起点、归档比估算、轮询异常容忍、轮询收尾停机），与既有 58 例一并跑 `:core:model / :core:data / :core:service / :core:network` 的 `testDebugUnitTest` 全绿。
+
+### M.5 本轮改动文件
+
+| 文件 | 改动 |
+| ---- | ---- |
+| `core/service/.../util/TransferProgress.kt` | 新增：单调进度 + 归档比估算 + 轮询收尾安全 |
+| `core/service/.../util/PackagesBackupUtil.kt` | 压缩期进度反馈、上传进度单调化 |
+| `core/service/.../util/MediumBackupUtil.kt` | 同上（媒体） |
+| `core/service/.../packages/backup/BackupServiceCloudImpl.kt` | 调用点分段进度、后处理上传轮询改造 |
+| `core/service/.../packages/backup/BackupServiceLocalImpl.kt` | 本地压缩全程进度 |
+| `core/service/.../medium/backup/BackupServiceCloudImpl.kt` | 同上（媒体云端） |
+| `core/service/.../medium/backup/BackupServiceLocalImpl.kt` | 同上（媒体本地） |
+| `core/network/.../io/CountingInputStreamImpl.kt` | 改用父类 `byteCount` 原生计数 |
+| `core/network/.../io/CountingOutputStreamImpl.kt` | 同上 |
+| `feature/main/processing/.../AbstractProcessingViewModel.kt` | 均值收敛 `[0,1]`、未初始化按 0 计入 |
+| `core/service/src/test/.../TransferProgressTest.kt` | 新增 7 例 |

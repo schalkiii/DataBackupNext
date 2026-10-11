@@ -17,13 +17,11 @@ import com.xayah.core.network.client.CloudClient
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.MediumBackupUtil
+import com.xayah.core.service.util.TransferProgress
+import com.xayah.core.service.util.withProgressTicker
 import com.xayah.core.util.PathUtil
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.coroutines.coroutineContext
 
 @AndroidEntryPoint
 internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupService() {
@@ -82,7 +80,8 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
     override suspend fun backup(m: MediaEntity, r: MediaEntity?, t: TaskDetailMediaEntity, dstDir: String) {
         val remoteFileDir = getRemoteFileDir(m.archivesRelativeDir)
 
-        val result = mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir)
+        // 云端备份压缩后还需上传：压缩占前半程进度，上传续走后半程
+        val result = mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir, compressProgressCap = 0.5f)
         if (result.isSuccess && t.mediaInfo.state != OperationState.SKIP) {
             mMediumBackupUtil.upload(client = mClient, m = m, t = t, srcDir = dstDir, dstDir = remoteFileDir)
         }
@@ -96,38 +95,24 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
 
     override suspend fun onItselfSaved(path: String, entity: ProcessingInfoEntity) {
         entity.update(state = OperationState.UPLOADING)
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    entity.update(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        val reporter = TransferProgress()
+        val result = withProgressTicker(onTick = {
+            entity.update(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            mCloudRepo.upload(client = mClient, src = path, dstDir = mRemotePath, onUploading = { read, total -> reporter.report(read, total) })
         }
-        mCloudRepo.upload(client = mClient, src = path, dstDir = mRemotePath, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
-        }
-        flag = false
+        entity.update(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = if (result.isSuccess) null else result.outString, content = "100%")
     }
 
     override suspend fun onConfigsSaved(path: String, entity: ProcessingInfoEntity) {
         entity.update(state = OperationState.UPLOADING)
-        var flag = true
-        var progress = 0f
-        with(CoroutineScope(coroutineContext)) {
-            launch {
-                while (flag) {
-                    entity.update(content = "${(progress * 100).toInt()}%")
-                    delay(500)
-                }
-            }
+        val reporter = TransferProgress()
+        val result = withProgressTicker(onTick = {
+            entity.update(content = "${(reporter.current * 100).toInt()}%", progress = reporter.current)
+        }) {
+            mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> reporter.report(read, total) })
         }
-        mCloudRepo.upload(client = mClient, src = path, dstDir = mRemoteConfigsDir, onUploading = { read, total -> progress = read.toFloat() / total }).apply {
-            entity.update(state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = if (isSuccess) null else outString, content = "100%")
-        }
-        flag = false
+        entity.update(state = if (result.isSuccess) OperationState.DONE else OperationState.ERROR, log = if (result.isSuccess) null else result.outString, content = "100%")
     }
 
     override suspend fun clear() {

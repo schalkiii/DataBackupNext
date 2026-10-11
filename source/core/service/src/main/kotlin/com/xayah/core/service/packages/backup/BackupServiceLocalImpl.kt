@@ -50,10 +50,11 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun backup(type: DataType, p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String) {
+        // 本地备份无上传阶段，压缩即数据项全程，进度区间为 0..1
         if (type == DataType.PACKAGE_APK) {
-            mPackagesBackupUtil.backupApk(p = p, t = t, r = r, dstDir = dstDir)
+            mPackagesBackupUtil.backupApk(p = p, t = t, r = r, dstDir = dstDir, compressProgressCap = 1f)
         } else {
-            mPackagesBackupUtil.backupData(p = p, t = t, r = r, dataType = type, dstDir = dstDir)
+            mPackagesBackupUtil.backupData(p = p, t = t, r = r, dataType = type, dstDir = dstDir, compressProgressCap = 1f)
         }
         t.update(dataType = type, progress = 1f)
         t.update(processingIndex = t.processingIndex + 1)

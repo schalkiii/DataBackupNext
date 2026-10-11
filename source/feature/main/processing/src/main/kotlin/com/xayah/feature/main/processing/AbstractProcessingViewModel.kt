@@ -116,13 +116,23 @@ abstract class AbstractProcessingViewModel(
 
     protected abstract val _dataItems: Flow<List<ProcessingDataCardItem>>
 
+    /**
+     * 汇总一组数据项的进度均值。
+     * 未开始的条目 progress 为 -1（哨兵值），收敛到 [0,1] 后按 0 计入，避免拉低均值导致百分比乱跳；
+     * 空列表返回 0，保证均值单调且落在 [0,1]。
+     */
+    private fun averageProgress(values: List<Float>): Float {
+        if (values.isEmpty()) return 0F
+        return values.sumOf { it.coerceIn(0F, 1F).toDouble() }.toFloat() / values.size
+    }
+
     protected val _taskId: MutableStateFlow<Long> = MutableStateFlow(-1)
     private var _task: Flow<TaskEntity?> = _taskId.flatMapLatest { id -> mTaskRepo.queryTaskFlow(id).flowOnIO() }
     private val _preItemsProgress: MutableStateFlow<Float> = MutableStateFlow(0F)
     private var _preItems: Flow<List<ProcessingCardItem>> = _taskId.flatMapLatest { id ->
         mTaskRepo.queryProcessingInfoFlow(id, ProcessingType.PREPROCESSING)
             .map { infoList ->
-                _preItemsProgress.value = infoList.sumOf { it.progress.toDouble() }.toFloat() / infoList.size
+                _preItemsProgress.value = averageProgress(infoList.map { it.progress })
                 val items = mutableListOf<ProcessingCardItem>()
                 infoList.forEach {
                     items.addInfo(it)
@@ -135,7 +145,7 @@ abstract class AbstractProcessingViewModel(
     private val _postItems: Flow<List<ProcessingCardItem>> = _taskId.flatMapLatest { id ->
         mTaskRepo.queryProcessingInfoFlow(id, ProcessingType.POST_PROCESSING)
             .map { infoList ->
-                _postItemsProgress.value = infoList.sumOf { it.progress.toDouble() }.toFloat() / infoList.size
+                _postItemsProgress.value = averageProgress(infoList.map { it.progress })
                 val items = mutableListOf<ProcessingCardItem>()
                 infoList.forEach {
                     items.addInfo(it)
